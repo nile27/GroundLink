@@ -26,6 +26,7 @@ cd server && npm run start:dev
 | `HOST` / `PORT` | `127.0.0.1` / `3000` |
 | `MQTT_URL` | `mqtt://127.0.0.1:1883` |
 | `DB_HOST` / `DB_PORT` | `127.0.0.1` / `5432` |
+| `DB_POOL_SIZE` | `10` (pg 커넥션 풀, 3~90. 텔레메트리 동시 저장 수 = 풀 - 2) |
 | `COMMAND_TIMEOUT_MS` | `10000` (ack가 이 시간 안에 안 오면 `TIMEOUT`) |
 | `BATCH_SIZE` / `FLUSH_MS` | `500` / `200` (텔레메트리 일괄 저장: 먼저 오는 조건에 저장) |
 | `MAX_BUFFER` / `OVERFLOW_POLICY` | `50000` / `drop-oldest` (역압: 저장 대기 상한, 넘으면 오래된 것부터 버림. 버린 건수는 `/metrics/ingest`와 10초 로그) |

@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Telemetry } from '../database/entities';
-import { DEFAULT_POOL_SIZE } from '../database/typeorm-options';
+import { readPoolSize } from '../database/typeorm-options';
 import { IngestMetricsService } from '../metrics/ingest-metrics.service';
 import { PendingQueue } from './pending-queue';
 
@@ -61,7 +61,7 @@ export class TelemetryWriterService implements BeforeApplicationShutdown {
   ) {
     this.batchSize = readPositiveInt(config, 'BATCH_SIZE', DEFAULTS.batchSize);
     this.flushMs = readPositiveInt(config, 'FLUSH_MS', DEFAULTS.flushMs);
-    this.maxConcurrentFlushes = Math.max(1, DEFAULT_POOL_SIZE - 2);
+    this.maxConcurrentFlushes = Math.max(1, readPoolSize((key) => config.get<string>(key)) - 2);
     this.maxBuffer = readPositiveInt(config, 'MAX_BUFFER', DEFAULTS.maxBuffer);
     const policy = config.get<string>('OVERFLOW_POLICY')?.trim() || DEFAULTS.overflowPolicy;
     if (!(OVERFLOW_POLICIES as readonly string[]).includes(policy)) {
