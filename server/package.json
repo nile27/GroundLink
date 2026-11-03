@@ -8,7 +8,12 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/main.js",
     "start:dev": "nest start --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "typeorm": "typeorm -d dist/database/data-source.js",
+    "migration:generate": "npm run build && typeorm migration:generate -d dist/database/data-source.js -p",
+    "migration:run": "npm run build && typeorm migration:run -d dist/database/data-source.js",
+    "migration:revert": "npm run build && typeorm migration:revert -d dist/database/data-source.js",
+    "migration:show": "npm run build && typeorm migration:show -d dist/database/data-source.js"
   },
   "dependencies": {
     "@groundlink/shared": "*",

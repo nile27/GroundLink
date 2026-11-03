@@ -26,7 +26,22 @@ cd server && npm run start:dev
 | `HOST` / `PORT` | `127.0.0.1` / `3000` |
 | `MQTT_URL` | `mqtt://127.0.0.1:1883` |
 | `DB_HOST` / `DB_PORT` | `127.0.0.1` / `5432` |
-| `DB_SYNC` | `true` (엔티티 → 테이블 자동 동기화, 개발용) |
+
+## 마이그레이션
+
+스키마는 TypeORM 마이그레이션으로만 바꾼다 (`synchronize: false`). 서버는 시작할 때 마이그레이션을 자동 실행하지 않는다.
+
+```bash
+cd server
+npm run migration:run                                   # 대기 중인 마이그레이션 적용
+npm run migration:show                                  # 적용 상태 확인
+npm run migration:revert                                # 마지막 1개 되돌리기
+npm run migration:generate -- src/database/migrations/<이름>   # 엔티티 변경 → 마이그레이션 생성
+```
+
+- 스크립트는 빌드 후 `dist/database/data-source.js`를 사용한다 (서버와 같은 .env를 읽음)
+- 새 DB: `migration:run` 한 번으로 전체 스키마 생성
+- `synchronize`로 만들었던 기존 DB는 `InitialSchema`를 적용된 것으로 기록해 두었다 (`docs/devlog.md` 참고)
 
 ## API
 
@@ -62,7 +77,10 @@ src/
 ├─ satellites/             /satellites API
 ├─ alarms/                 /alarms API
 ├─ health/                 /health
-└─ database/entities/      TypeORM 엔티티
+├─ database/entities/      TypeORM 엔티티
+├─ database/migrations/    마이그레이션
+├─ database/typeorm-options.ts  접속 설정 (서버·CLI 공용)
+└─ database/data-source.ts      TypeORM CLI용 DataSource
 ```
 
 > 현재는 **성능 개선 전 기준선** 구현입니다. 메시지마다 INSERT를 하나씩 하고, `/satellites`는 위성마다 쿼리를 1건씩 실행합니다(N+1).
