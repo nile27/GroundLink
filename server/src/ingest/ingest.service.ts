@@ -193,6 +193,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy, OnApplicati
         `alarm ${perSec(this.window.alarm)}, ack ${perSec(this.window.cmdAck)}) | ` +
         `누적 ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed + this.metricsFailed()} | ` +
         `버퍼 ${this.writer.bufferSize} (저장 중 ${this.writer.inflightFlushes}) | ` +
+        `역압 버림 ${win.dropped} (누적 ${win.droppedTotal}) | ` +
         `수신→커밋 p50 ${w.p50 ?? '-'}ms p99 ${w.p99 ?? '-'}ms max ${w.max ?? '-'}ms`,
     );
     for (const k of Object.keys(this.window) as StoredKind[]) this.window[k] = 0;

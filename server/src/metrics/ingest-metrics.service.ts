@@ -11,8 +11,14 @@ export interface IngestMetricsSnapshot {
     committed: number;
     /** 저장 실패 행 */
     failed: number;
+    /** 역압으로 버린 행 (버퍼가 MAX_BUFFER에 찼을 때) */
+    dropped: number;
   };
   buffer: {
+    /** 버퍼 상한 (MAX_BUFFER) */
+    limit: number | null;
+    /** 상한 초과 시 정책 (OVERFLOW_POLICY) */
+    overflowPolicy: string | null;
     /** 현재 저장 대기 행 수 */
     size: number;
     /** 시작 이후 최대 저장 대기 행 수 */
@@ -48,6 +54,10 @@ export class IngestMetricsService {
   private flushes = 0;
   private flushedRows = 0;
   private windowCommitted = 0;
+  private dropped = 0;
+  private windowDropped = 0;
+  private bufferLimit: number | null = null;
+  private overflowPolicy: string | null = null;
 
   private readonly total = { receiveToCommit: new LatencyHistogram(), publishToCommit: new LatencyHistogram() };
   /** 10초 로그용 구간 히스토그램 (takeWindow()로 읽고 비운다) */
@@ -70,6 +80,16 @@ export class IngestMetricsService {
     this.failed += n;
   }
 
+  configureBuffer(limit: number, policy: string): void {
+    this.bufferLimit = limit;
+    this.overflowPolicy = policy;
+  }
+
+  telemetryDropped(n = 1): void {
+    this.dropped += n;
+    this.windowDropped += n;
+  }
+
   bufferSize(n: number): void {
     this.buffered = n;
     if (n > this.maxBuffered) this.maxBuffered = n;
@@ -89,10 +109,16 @@ export class IngestMetricsService {
   }
 
   /** 10초 로그용: 구간 커밋 건수와 수신→커밋 지연을 읽고 비운다 */
-  takeWindow(): { committed: number; receiveToCommit: LatencySummary } {
-    const s = { committed: this.windowCommitted, receiveToCommit: this.window.receiveToCommit.summary() };
+  takeWindow(): { committed: number; dropped: number; droppedTotal: number; receiveToCommit: LatencySummary } {
+    const s = {
+      committed: this.windowCommitted,
+      dropped: this.windowDropped,
+      droppedTotal: this.dropped,
+      receiveToCommit: this.window.receiveToCommit.summary(),
+    };
     this.window.receiveToCommit.reset();
     this.windowCommitted = 0;
+    this.windowDropped = 0;
     return s;
   }
 
@@ -100,8 +126,8 @@ export class IngestMetricsService {
     return {
       startedAt: this.startedAt.toISOString(),
       uptimeSec: Math.round((Date.now() - this.startedAt.getTime()) / 1000),
-      telemetry: { received: this.received, committed: this.committed, failed: this.failed },
-      buffer: { size: this.buffered, maxSize: this.maxBuffered },
+      telemetry: { received: this.received, committed: this.committed, failed: this.failed, dropped: this.dropped },
+      buffer: { limit: this.bufferLimit, overflowPolicy: this.overflowPolicy, size: this.buffered, maxSize: this.maxBuffered },
       flush: { count: this.flushes, avgRows: this.flushes ? Math.round((this.flushedRows / this.flushes) * 10) / 10 : null },
       latencyMs: {
         receiveToCommit: this.total.receiveToCommit.summary(),

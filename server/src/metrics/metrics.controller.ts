@@ -15,9 +15,13 @@ class TelemetryCountsDto {
   @ApiProperty({ description: '받은 텔레메트리 (형식 검증 통과)' }) received: number;
   @ApiProperty({ description: 'DB 커밋까지 끝난 행' }) committed: number;
   @ApiProperty({ description: '저장 실패 행' }) failed: number;
+  @ApiProperty({ description: '역압으로 버린 행 (버퍼가 MAX_BUFFER에 찼을 때)' }) dropped: number;
 }
 
 class BufferDto {
+  @ApiProperty({ nullable: true, type: Number, description: '버퍼 상한 (MAX_BUFFER)' }) limit: number | null;
+  @ApiProperty({ nullable: true, type: String, enum: ['drop-oldest', 'drop-newest'], description: '상한 초과 시 정책' })
+  overflowPolicy: string | null;
   @ApiProperty({ description: '현재 저장 대기 행 수' }) size: number;
   @ApiProperty({ description: '시작 이후 최대 저장 대기 행 수' }) maxSize: number;
 }

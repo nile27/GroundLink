@@ -28,6 +28,7 @@ cd server && npm run start:dev
 | `DB_HOST` / `DB_PORT` | `127.0.0.1` / `5432` |
 | `COMMAND_TIMEOUT_MS` | `10000` (ack가 이 시간 안에 안 오면 `TIMEOUT`) |
 | `BATCH_SIZE` / `FLUSH_MS` | `500` / `200` (텔레메트리 일괄 저장: 먼저 오는 조건에 저장) |
+| `MAX_BUFFER` / `OVERFLOW_POLICY` | `50000` / `drop-oldest` (역압: 저장 대기 상한, 넘으면 오래된 것부터 버림. 버린 건수는 `/metrics/ingest`와 10초 로그) |
 
 ## 마이그레이션
 
