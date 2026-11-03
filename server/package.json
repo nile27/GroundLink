@@ -1,0 +1,29 @@
+{
+  "name": "@groundlink/server",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GroundLink 수집 서버 — MQTT 구독 → PostgreSQL 저장, REST API",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/main.js",
+    "start:dev": "nest start --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@groundlink/shared": "*",
+    "@nestjs/common": "12.3.2",
+    "@nestjs/config": "12.0.1",
+    "@nestjs/core": "12.3.2",
+    "@nestjs/platform-express": "12.3.2",
+    "@nestjs/swagger": "12.1.0",
+    "@nestjs/typeorm": "12.0.2",
+    "class-transformer": "0.5.1",
+    "class-validator": "0.15.1",
+    "mqtt": "5.16.1",
+    "pg": "8.23.1",
+    "reflect-metadata": "0.2.2",
+    "rxjs": "7.8.2",
+    "typeorm": "1.1.2"
+  }
+}

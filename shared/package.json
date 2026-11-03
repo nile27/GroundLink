@@ -1,0 +1,13 @@
+{
+  "name": "@groundlink/shared",
+  "version": "0.1.0",
+  "private": true,
+  "description": "simulator와 server가 공유하는 MQTT 메시지 타입과 토픽 상수",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "clean": "rm -rf dist"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "name": "@groundlink/simulator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "가상 위성 시뮬레이터 — 텔레메트리/이벤트/알람을 MQTT로 발행",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "start": "node --env-file-if-exists=.env dist/index.js",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@groundlink/shared": "*",
+    "mqtt": "5.16.1"
+  }
+}
