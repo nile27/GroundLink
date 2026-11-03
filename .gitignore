@@ -1,8 +1,10 @@
-# dependencies / build
+# dependencies / build (Node)
 node_modules/
 dist/
 build/
 coverage/
+*.tsbuildinfo
+.npm/
 
 # env
 .env
@@ -11,6 +13,8 @@ coverage/
 
 # local data
 data/
+*.dump
+*.bak
 
 # logs
 logs/
@@ -19,10 +23,25 @@ npm-debug.log*
 yarn-debug.log*
 pnpm-debug.log*
 
-# OS / editor
-.DS_Store
-.idea/
-.vscode/
+# .NET / WPF (monitor)
+bin/
+obj/
+.vs/
+*.user
+*.suo
+*.rsuser
+TestResults/
+*.nupkg
 
-# TypeScript
-*.tsbuildinfo
+# OS
+.DS_Store
+Thumbs.db
+
+# editor
+.idea/
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# Claude Code (개인 설정)
+.claude/settings.local.json
