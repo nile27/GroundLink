@@ -4,6 +4,7 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { ENV_FILE_PATHS } from './config/env';
 import { buildDataSourceOptions } from './database/typeorm-options';
 import { MqttModule } from './mqtt/mqtt.module';
+import { MetricsModule } from './metrics/metrics.module';
 import { IngestModule } from './ingest/ingest.module';
 import { SatellitesModule } from './satellites/satellites.module';
 import { AlarmsModule } from './alarms/alarms.module';
@@ -17,6 +18,7 @@ import { HealthController } from './health/health.controller';
       useFactory: (config: ConfigService) => buildDataSourceOptions((key) => config.get<string>(key)),
     }),
     MqttModule,
+    MetricsModule,
     IngestModule,
     SatellitesModule,
     AlarmsModule,

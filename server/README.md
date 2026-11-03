@@ -54,6 +54,7 @@ npm run migration:generate -- src/database/migrations/<이름>   # 엔티티 변
 | POST | `/satellites/:id/commands` | `{"type":"SET_MODE","mode":"SAFE"}` → 202 + PENDING 명령. ack가 오면 SUCCESS/FAILED, 시간 안에 안 오면 TIMEOUT |
 | GET | `/satellites/:id/commands?limit=` | 명령 이력과 ack 결과 |
 | GET | `/alarms?limit=` | 최근 알람 (기본 50·최대 500) |
+| GET | `/metrics/ingest` | 서버 시작 이후 수집 지표: 받은 / 커밋 / 실패 건수, 수신→커밋·발행→커밋 지연 백분위 |
 
 ## 테이블
 
@@ -78,6 +79,7 @@ src/
 ├─ satellites/             /satellites API
 ├─ alarms/                 /alarms API
 ├─ health/                 /health
+├─ metrics/                수집 지표 (수신→커밋 지연 히스토그램), /metrics/ingest
 ├─ database/entities/      TypeORM 엔티티
 ├─ database/migrations/    마이그레이션
 ├─ database/typeorm-options.ts  접속 설정 (서버·CLI 공용)

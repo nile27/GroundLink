@@ -13,6 +13,7 @@ import {
 import { Alarm, SatEvent, Satellite, Telemetry } from '../database/entities';
 import { MqttService } from '../mqtt/mqtt.service';
 import { CommandsService } from '../commands/commands.service';
+import { IngestMetricsService } from '../metrics/ingest-metrics.service';
 
 type StoredKind = Exclude<TopicKind, 'cmd'>;
 
@@ -40,6 +41,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   constructor(
     private readonly mqtt: MqttService,
     private readonly commands: CommandsService,
+    private readonly metrics: IngestMetricsService,
     @InjectRepository(Satellite) private readonly satellites: Repository<Satellite>,
     @InjectRepository(Telemetry) private readonly telemetry: Repository<Telemetry>,
     @InjectRepository(SatEvent) private readonly events: Repository<SatEvent>,
@@ -81,6 +83,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       switch (parsed.kind) {
         case 'telemetry':
           if (!isTelemetryMessage(msg) || msg.satId !== parsed.satId) return this.drop(topic, '형식 오류');
+          this.metrics.telemetryReceived();
           await this.ensureSatellite(msg.satId);
           await this.telemetry.insert({
             satId: msg.satId,
@@ -92,6 +95,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
             sunlit: msg.sunlit,
             receivedAt,
           });
+          this.metrics.telemetryCommitted(receivedAt.getTime(), msg.ts);
           break;
 
         case 'event':
@@ -127,6 +131,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       this.count(parsed.kind);
     } catch (err) {
       this.failed++;
+      if (parsed.kind === 'telemetry') this.metrics.telemetryFailed();
       this.logger.error(`저장 실패 (${topic}): ${(err as Error).message}`);
     }
   }
@@ -164,11 +169,13 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const sec = RATE_LOG_INTERVAL_MS / 1000;
     const sum = Object.values(this.window).reduce((a, b) => a + b, 0);
     const perSec = (n: number) => (n / sec).toFixed(1);
+    const w = this.metrics.takeWindow().receiveToCommit;
     this.logger.log(
       `[rate] 저장 ${perSec(sum)} rows/s ` +
         `(telemetry ${perSec(this.window.telemetry)}, event ${perSec(this.window.event)}, ` +
         `alarm ${perSec(this.window.alarm)}, ack ${perSec(this.window.cmdAck)}) | ` +
-        `누적 ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed}`,
+        `누적 ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed} | ` +
+        `수신→커밋 p50 ${w.p50 ?? '-'}ms p99 ${w.p99 ?? '-'}ms max ${w.max ?? '-'}ms`,
     );
     for (const k of Object.keys(this.window) as StoredKind[]) this.window[k] = 0;
   }
