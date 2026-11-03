@@ -18,7 +18,7 @@ function readNumber(name: string, fallback: number, check: (n: number) => boolea
 
 export function loadConfig(): SimulatorConfig {
   return {
-    satCount: readNumber('SAT_COUNT', 10, (n) => Number.isInteger(n) && n >= 1 && n <= 999, '1~999 정수'),
+    satCount: readNumber('SAT_COUNT', 10, (n) => Number.isInteger(n) && n >= 1 && n <= 9999, '1~9999 정수'),
     intervalMs: readNumber('INTERVAL_MS', 1000, (n) => n >= 10, '10 이상'),
     timeScale: readNumber('TIME_SCALE', 60, (n) => n > 0, '0보다 큰 수'),
     anomalyRate: readNumber('ANOMALY_RATE', 0.001, (n) => n >= 0 && n <= 1, '0~1'),
