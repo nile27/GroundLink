@@ -1,4 +1,4 @@
-import { Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Injectable, Logger, OnApplicationShutdown, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import {
@@ -10,10 +10,11 @@ import {
   isTelemetryMessage,
   type TopicKind,
 } from '@groundlink/shared';
-import { Alarm, SatEvent, Satellite, Telemetry } from '../database/entities';
+import { Alarm, SatEvent, Satellite } from '../database/entities';
 import { MqttService } from '../mqtt/mqtt.service';
 import { CommandsService } from '../commands/commands.service';
 import { IngestMetricsService } from '../metrics/ingest-metrics.service';
+import { TelemetryWriterService } from './telemetry-writer.service';
 
 type StoredKind = Exclude<TopicKind, 'cmd'>;
 
@@ -22,11 +23,11 @@ const RATE_LOG_INTERVAL_MS = 10_000;
 /**
  * MQTT 메시지를 받아 DB에 저장한다.
  *
- * [기준선] 메시지 1건 = INSERT 1건. 일괄 저장·큐·집계 없음.
- * 성능 개선은 다음 단계에서 이 구현과 비교하며 진행한다.
+ * - 텔레메트리: TelemetryWriterService 버퍼에 넣고 일괄 저장 (개선 A)
+ * - event·alarm·cmd ack: 건수가 적어 지금처럼 1건씩 즉시 저장
  */
 @Injectable()
-export class IngestService implements OnModuleInit, OnModuleDestroy {
+export class IngestService implements OnModuleInit, OnModuleDestroy, OnApplicationShutdown {
   private readonly logger = new Logger(IngestService.name);
 
   /** satellites 테이블에 등록이 끝난(또는 진행 중인) 위성. 동시에 온 첫 메시지들이 중복 INSERT 하지 않게 Promise를 보관 */
@@ -42,8 +43,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     private readonly mqtt: MqttService,
     private readonly commands: CommandsService,
     private readonly metrics: IngestMetricsService,
+    private readonly writer: TelemetryWriterService,
     @InjectRepository(Satellite) private readonly satellites: Repository<Satellite>,
-    @InjectRepository(Telemetry) private readonly telemetry: Repository<Telemetry>,
     @InjectRepository(SatEvent) private readonly events: Repository<SatEvent>,
     @InjectRepository(Alarm) private readonly alarms: Repository<Alarm>,
   ) {}
@@ -62,7 +63,16 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
 
   onModuleDestroy(): void {
     clearInterval(this.rateTimer);
-    this.logger.log(`최종 누적 저장: ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed}`);
+  }
+
+  /** 버퍼 저장(beforeApplicationShutdown)이 끝난 뒤에 최종 누적을 남긴다 */
+  onApplicationShutdown(): void {
+    this.total.telemetry = this.metrics.committedTotal;
+    this.logger.log(`최종 누적 저장: ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed + this.metricsFailed()}`);
+  }
+
+  private metricsFailed(): number {
+    return this.metrics.snapshot().telemetry.failed;
   }
 
   private async handle(topic: string, payload: Buffer): Promise<void> {
@@ -85,18 +95,21 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
           if (!isTelemetryMessage(msg) || msg.satId !== parsed.satId) return this.drop(topic, '형식 오류');
           this.metrics.telemetryReceived();
           await this.ensureSatellite(msg.satId);
-          await this.telemetry.insert({
-            satId: msg.satId,
-            ts: new Date(msg.ts),
-            battery: msg.battery,
-            temp: msg.temp,
-            rssi: msg.rssi,
-            mode: msg.mode,
-            sunlit: msg.sunlit,
-            receivedAt,
-          });
-          this.metrics.telemetryCommitted(receivedAt.getTime(), msg.ts);
-          break;
+          this.writer.enqueue(
+            {
+              satId: msg.satId,
+              ts: new Date(msg.ts),
+              battery: msg.battery,
+              temp: msg.temp,
+              rssi: msg.rssi,
+              mode: msg.mode,
+              sunlit: msg.sunlit,
+              receivedAt,
+            },
+            receivedAt.getTime(),
+            msg.ts,
+          );
+          return; // 저장 건수는 커밋 후 지표(IngestMetricsService)에서 센다
 
         case 'event':
           if (!isEventMessage(msg) || msg.satId !== parsed.satId) return this.drop(topic, '형식 오류');
@@ -130,8 +143,9 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
       }
       this.count(parsed.kind);
     } catch (err) {
-      this.failed++;
-      if (parsed.kind === 'telemetry') this.metrics.telemetryFailed();
+      // 텔레메트리 실패는 지표 쪽에서 센다 (일괄 저장 실패와 합산)
+      if (parsed.kind === 'telemetry') this.metrics.telemetryFailed(); // 위성 등록 실패 등
+      else this.failed++;
       this.logger.error(`저장 실패 (${topic}): ${(err as Error).message}`);
     }
   }
@@ -169,12 +183,16 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
     const sec = RATE_LOG_INTERVAL_MS / 1000;
     const sum = Object.values(this.window).reduce((a, b) => a + b, 0);
     const perSec = (n: number) => (n / sec).toFixed(1);
-    const w = this.metrics.takeWindow().receiveToCommit;
+    const win = this.metrics.takeWindow();
+    this.window.telemetry = win.committed;
+    this.total.telemetry = this.metrics.committedTotal;
+    const w = win.receiveToCommit;
     this.logger.log(
       `[rate] 저장 ${perSec(sum)} rows/s ` +
         `(telemetry ${perSec(this.window.telemetry)}, event ${perSec(this.window.event)}, ` +
         `alarm ${perSec(this.window.alarm)}, ack ${perSec(this.window.cmdAck)}) | ` +
-        `누적 ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed} | ` +
+        `누적 ${this.format(this.total)} | 버림 ${this.dropped}, 실패 ${this.failed + this.metricsFailed()} | ` +
+        `버퍼 ${this.writer.bufferSize} (저장 중 ${this.writer.inflightFlushes}) | ` +
         `수신→커밋 p50 ${w.p50 ?? '-'}ms p99 ${w.p99 ?? '-'}ms max ${w.max ?? '-'}ms`,
     );
     for (const k of Object.keys(this.window) as StoredKind[]) this.window[k] = 0;

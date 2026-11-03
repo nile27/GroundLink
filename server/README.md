@@ -27,6 +27,7 @@ cd server && npm run start:dev
 | `MQTT_URL` | `mqtt://127.0.0.1:1883` |
 | `DB_HOST` / `DB_PORT` | `127.0.0.1` / `5432` |
 | `COMMAND_TIMEOUT_MS` | `10000` (ack가 이 시간 안에 안 오면 `TIMEOUT`) |
+| `BATCH_SIZE` / `FLUSH_MS` | `500` / `200` (텔레메트리 일괄 저장: 먼저 오는 조건에 저장) |
 
 ## 마이그레이션
 
@@ -74,7 +75,7 @@ src/
 ├─ app.module.ts           Config / TypeORM / 각 모듈 조립
 ├─ config/env.ts           .env 파일 경로 (server/.env → infra/.env)
 ├─ mqtt/                   mqtt.js 래퍼 서비스 (연결·구독·발행)
-├─ ingest/                 MQTT 수신 → 메시지 1건당 INSERT 1건, 10초마다 저장률 로그
+├─ ingest/                 MQTT 수신 → 텔레메트리는 버퍼 후 다중 행 INSERT(telemetry-writer), event·alarm·ack는 즉시 저장, 10초마다 저장률 로그
 ├─ commands/               명령 기록·발행, ack 반영, ack 타임아웃 (재시작 시 남은 PENDING 정리)
 ├─ satellites/             /satellites API
 ├─ alarms/                 /alarms API
@@ -86,5 +87,7 @@ src/
 └─ database/data-source.ts      TypeORM CLI용 DataSource
 ```
 
-> 현재는 **성능 개선 전 기준선** 구현입니다. 메시지마다 INSERT를 하나씩 하고, `/satellites`는 위성마다 쿼리를 1건씩 실행합니다(N+1).
-> 측정값은 `docs/perf-baseline.md`에 있습니다.
+> 텔레메트리는 일괄 저장(개선 A)합니다. `/satellites`는 아직 위성마다 쿼리를 1건씩 실행합니다(N+1).
+> 측정값은 `docs/perf-baseline.md`, 개선 단계별 비교는 `docs/perf-improvements.md`에 있습니다.
+>
+> SQL Server로 바꿀 때: 쿼리 1건의 파라미터가 2,100개로 제한된다. 텔레메트리 1행이 8개라 `BATCH_SIZE`는 260 이하로 줄이거나 나눠 보내야 한다.

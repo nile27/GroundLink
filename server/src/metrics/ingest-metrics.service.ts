@@ -12,6 +12,18 @@ export interface IngestMetricsSnapshot {
     /** 저장 실패 행 */
     failed: number;
   };
+  buffer: {
+    /** 현재 저장 대기 행 수 */
+    size: number;
+    /** 시작 이후 최대 저장 대기 행 수 */
+    maxSize: number;
+  };
+  flush: {
+    /** 다중 행 INSERT 횟수 */
+    count: number;
+    /** INSERT 1회당 평균 행 수 */
+    avgRows: number | null;
+  };
   latencyMs: {
     /** 서버 수신 → INSERT 커밋 완료 (서버 시계만 사용) */
     receiveToCommit: LatencySummary;
@@ -31,6 +43,11 @@ export class IngestMetricsService {
   private received = 0;
   private committed = 0;
   private failed = 0;
+  private buffered = 0;
+  private maxBuffered = 0;
+  private flushes = 0;
+  private flushedRows = 0;
+  private windowCommitted = 0;
 
   private readonly total = { receiveToCommit: new LatencyHistogram(), publishToCommit: new LatencyHistogram() };
   /** 10초 로그용 구간 히스토그램 (takeWindow()로 읽고 비운다) */
@@ -43,6 +60,7 @@ export class IngestMetricsService {
   /** 커밋 완료 직후 호출. receivedAt·publishedAt은 epoch ms */
   telemetryCommitted(receivedAt: number, publishedAt: number, committedAt = Date.now()): void {
     this.committed++;
+    this.windowCommitted++;
     this.total.receiveToCommit.record(committedAt - receivedAt);
     this.window.receiveToCommit.record(committedAt - receivedAt);
     this.total.publishToCommit.record(committedAt - publishedAt);
@@ -52,9 +70,29 @@ export class IngestMetricsService {
     this.failed += n;
   }
 
-  takeWindow(): { receiveToCommit: LatencySummary } {
-    const s = { receiveToCommit: this.window.receiveToCommit.summary() };
+  bufferSize(n: number): void {
+    this.buffered = n;
+    if (n > this.maxBuffered) this.maxBuffered = n;
+  }
+
+  flushed(rows: number): void {
+    this.flushes++;
+    this.flushedRows += rows;
+  }
+
+  get committedTotal(): number {
+    return this.committed;
+  }
+
+  get bufferedNow(): number {
+    return this.buffered;
+  }
+
+  /** 10초 로그용: 구간 커밋 건수와 수신→커밋 지연을 읽고 비운다 */
+  takeWindow(): { committed: number; receiveToCommit: LatencySummary } {
+    const s = { committed: this.windowCommitted, receiveToCommit: this.window.receiveToCommit.summary() };
     this.window.receiveToCommit.reset();
+    this.windowCommitted = 0;
     return s;
   }
 
@@ -63,6 +101,8 @@ export class IngestMetricsService {
       startedAt: this.startedAt.toISOString(),
       uptimeSec: Math.round((Date.now() - this.startedAt.getTime()) / 1000),
       telemetry: { received: this.received, committed: this.committed, failed: this.failed },
+      buffer: { size: this.buffered, maxSize: this.maxBuffered },
+      flush: { count: this.flushes, avgRows: this.flushes ? Math.round((this.flushedRows / this.flushes) * 10) / 10 : null },
       latencyMs: {
         receiveToCommit: this.total.receiveToCommit.summary(),
         publishToCommit: this.total.publishToCommit.summary(),

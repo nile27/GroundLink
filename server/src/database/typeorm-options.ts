@@ -2,6 +2,9 @@ import { join } from 'node:path';
 import type { DataSourceOptions } from 'typeorm';
 import { ENTITIES } from './entities';
 
+/** pg 커넥션 풀 크기 (pg 기본값과 같음) */
+export const DEFAULT_POOL_SIZE = 10;
+
 type EnvGetter = (key: string) => string | undefined;
 
 /**

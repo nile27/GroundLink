@@ -17,6 +17,16 @@ class TelemetryCountsDto {
   @ApiProperty({ description: '저장 실패 행' }) failed: number;
 }
 
+class BufferDto {
+  @ApiProperty({ description: '현재 저장 대기 행 수' }) size: number;
+  @ApiProperty({ description: '시작 이후 최대 저장 대기 행 수' }) maxSize: number;
+}
+
+class FlushDto {
+  @ApiProperty({ description: '다중 행 INSERT 횟수' }) count: number;
+  @ApiProperty({ nullable: true, type: Number, description: 'INSERT 1회당 평균 행 수' }) avgRows: number | null;
+}
+
 class IngestLatencyDto {
   @ApiProperty({ type: LatencySummaryDto, description: '서버 수신 → INSERT 커밋 완료 (ms)' })
   receiveToCommit: LatencySummaryDto;
@@ -29,6 +39,8 @@ class IngestMetricsDto implements IngestMetricsSnapshot {
   @ApiProperty() startedAt: string;
   @ApiProperty() uptimeSec: number;
   @ApiProperty({ type: TelemetryCountsDto }) telemetry: TelemetryCountsDto;
+  @ApiProperty({ type: BufferDto }) buffer: BufferDto;
+  @ApiProperty({ type: FlushDto }) flush: FlushDto;
   @ApiProperty({ type: IngestLatencyDto }) latencyMs: IngestLatencyDto;
 }
 
