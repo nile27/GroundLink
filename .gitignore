@@ -12,6 +12,7 @@ coverage/
 !.env.example
 
 # local data
+bench/results/
 data/
 *.dump
 *.bak
