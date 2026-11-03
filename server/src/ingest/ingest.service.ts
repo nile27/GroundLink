@@ -181,10 +181,10 @@ export class IngestService implements OnModuleInit, OnModuleDestroy, OnApplicati
 
   private logRate(): void {
     const sec = RATE_LOG_INTERVAL_MS / 1000;
-    const sum = Object.values(this.window).reduce((a, b) => a + b, 0);
     const perSec = (n: number) => (n / sec).toFixed(1);
     const win = this.metrics.takeWindow();
     this.window.telemetry = win.committed;
+    const sum = Object.values(this.window).reduce((a, b) => a + b, 0);
     this.total.telemetry = this.metrics.committedTotal;
     const w = win.receiveToCommit;
     this.logger.log(
