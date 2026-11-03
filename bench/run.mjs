@@ -133,6 +133,10 @@ async function waitHealth(timeoutMs = 30_000) {
 }
 
 /** docker stats를 반복 실행해 { t, name, cpuPct, memMiB } 를 모은다 */
+/** docker stats 값의 상한. 이보다 크면 샘플 간격 오류로 보고 제외한다 (VM이 잠깐 멈춘 순간 등) */
+let DOCKER_CPUS = 8;
+const cpuLimit = (name) => (name === 'gl-mosquitto' ? 100 : DOCKER_CPUS * 100); // mosquitto는 단일 스레드
+
 function startDockerStats(file) {
   const samples = [];
   let running = true;
@@ -145,7 +149,8 @@ function startDockerStats(file) {
         const t = Date.now();
         for (const line of stdout.trim().split('\n')) {
           const j = JSON.parse(line);
-          const s = { t, name: j.Name, cpuPct: parseFloat(j.CPUPerc), memMiB: toMiB(j.MemUsage.split('/')[0].trim()) };
+          const cpuPct = parseFloat(j.CPUPerc);
+          const s = { t, name: j.Name, cpuPct, memMiB: toMiB(j.MemUsage.split('/')[0].trim()), invalid: cpuPct > cpuLimit(j.Name) };
           samples.push(s);
           appendFileSync(file, JSON.stringify(s) + '\n');
         }
@@ -156,6 +161,30 @@ function startDockerStats(file) {
     }
   })();
   return { samples, stop: async () => { running = false; await loop; } };
+}
+
+/** 서버 /metrics/ingest를 1초마다 읽어 기록 (서버 시계 기준 초당 커밋 수, 버퍼 크기) */
+function startMetricsPoll(file) {
+  const rows = [];
+  let running = true;
+  const loop = (async () => {
+    while (running) {
+      const t = Date.now();
+      try {
+        const res = await fetch('http://127.0.0.1:3000/metrics/ingest');
+        if (res.ok) {
+          const m = await res.json();
+          const row = { t, committed: m.telemetry.committed, received: m.telemetry.received, dropped: m.telemetry.dropped ?? 0, buffer: m.buffer.size };
+          rows.push(row);
+          appendFileSync(file, JSON.stringify(row) + '\n');
+        }
+      } catch {
+        // 서버가 바쁘거나 종료됨
+      }
+      await sleep(Math.max(0, 1000 - (Date.now() - t)));
+    }
+  })();
+  return { rows, stop: async () => { running = false; await loop; } };
 }
 
 function toMiB(s) {
@@ -222,6 +251,7 @@ async function envInfo() {
     sh('sw_vers', ['-productVersion']),
   ]);
   const dockerInfo = JSON.parse(await sh('docker', ['info', '--format', '{{json .}}']));
+  DOCKER_CPUS = dockerInfo.NCPU;
   const pgSettings = await q(`SELECT name, setting, unit FROM pg_settings WHERE name IN
     ('shared_buffers','synchronous_commit','fsync','wal_buffers','max_wal_size','checkpoint_timeout','max_connections','work_mem')`);
   const [pgVer] = await q('SHOW server_version');
@@ -236,6 +266,19 @@ async function envInfo() {
 }
 
 /** DB 시계와 호스트 시계 차이 (inserted_at은 DB 시계, 나머지는 호스트 시계) */
+async function hostLoad() {
+  try {
+    const [{ stdout: load }, { stdout: swap }] = await Promise.all([
+      execFileP('sysctl', ['-n', 'vm.loadavg']),
+      execFileP('sysctl', ['-n', 'vm.swapusage']),
+    ]);
+    const used = /used = ([\d.]+)M/.exec(swap);
+    return { loadavg: load.trim().replace(/[{}]/g, '').trim().split(/\s+/).map(Number), swapUsedMiB: used ? Number(used[1]) : null };
+  } catch {
+    return null;
+  }
+}
+
 async function clockOffsetMs() {
   const samples = [];
   for (let i = 0; i < 5; i++) {
@@ -263,6 +306,7 @@ async function runStage(idx, stage) {
     simProbe: join(OUT, `${tag}-sim-probe.jsonl`),
     docker: join(OUT, `${tag}-docker-stats.jsonl`),
     pgLog: join(OUT, `${tag}-postgres.log`),
+    metrics: join(OUT, `${tag}-metrics.jsonl`),
   };
 
   if (RESET) {
@@ -271,10 +315,12 @@ async function runStage(idx, stage) {
   }
   const before = await pgSnapshot();
   const clock = await clockOffsetMs();
+  const loadStart = await hostLoad();
 
   const server = startProc('server', ['server/dist/main.js'], { PROBE_OUT: files.serverProbe }, files.server);
   await waitHealth();
   const stats = startDockerStats(files.docker);
+  const poll = startMetricsPoll(files.metrics);
   await sleep(3000); // 유휴 상태 샘플 확보
 
   const simStart = Date.now();
@@ -314,6 +360,9 @@ async function runStage(idx, stage) {
     log('서버 /metrics/ingest 응답 없음 (서버 종료됨?)');
   }
 
+  const clockEnd = await clockOffsetMs();
+  const loadEnd = await hostLoad();
+  await poll.stop();
   await sleep(2000);
   await stats.stop();
   await stopProc('server', server);
@@ -327,7 +376,7 @@ async function runStage(idx, stage) {
     log(`postgres 로그 수집 실패: ${err.message}`);
   }
 
-  return analyze({ tag, label, stage, files, before, after, clock, simStart, simStop, simRates, simTotals, srv, catchUpWaitMs, appMetrics, dockerSamples: stats.samples });
+  return analyze({ tag, label, stage, files, before, after, clock, simStart, simStop, simRates, simTotals, srv, catchUpWaitMs, appMetrics, dockerSamples: stats.samples, metricRows: poll.rows, clockEnd, loadStart, loadEnd });
 }
 
 async function analyze(ctx) {
@@ -418,8 +467,10 @@ async function analyze(ctx) {
   });
   const dockerStats = {};
   for (const name of ['gl-mosquitto', 'gl-postgres']) {
-    const rows = ctx.dockerSamples.filter((s) => s.name === name && inWindow(s.t));
+    const all = ctx.dockerSamples.filter((s) => s.name === name && inWindow(s.t));
+    const rows = all.filter((s) => !s.invalid);
     dockerStats[name] = {
+      excludedInvalid: all.length - rows.length,
       cpuPctAvg: r1(avg(rows.map((r) => r.cpuPct))),
       cpuPctMax: r1(max(rows.map((r) => r.cpuPct))),
       memMiBMax: r1(max(rows.map((r) => r.memMiB))),
@@ -430,7 +481,26 @@ async function analyze(ctx) {
   const steadyRate = (rates) => r1(avg(rates.filter((r) => r.t >= simStart + 15_000 && r.t <= simStop + 1000).map((r) => r.total)));
   const published = ctx.simTotals;
   const lost = published ? published.telemetry - lat.n : null;
-  const catchUpMs = r1(Number(lat.last_ins) - Number(lat.last_ts));
+  const catchUpDbMs = r1(Number(lat.last_ins) - Number(lat.last_ts));
+  // 서버 시계 기준 (DB/VM 시계 어긋남 영향 없음). 서버가 죽어 지표가 없으면 DB 기준을 쓴다
+  const mc = ctx.appMetrics?.clock;
+  const catchUpServerMs = mc?.lastCommittedAt && mc?.lastPublishedTs ? r1(mc.lastCommittedAt - mc.lastPublishedTs) : null;
+  const catchUpMs = catchUpServerMs ?? catchUpDbMs;
+
+  // 서버 시계 기준 초당 커밋 수 (1초 폴링 차분) — 정상 구간만
+  const mr = ctx.metricRows;
+  const perSecServer = [];
+  for (let i = 1; i < mr.length; i++) {
+    if (mr[i].t < simStart + 15_000 || mr[i].t > simStop - 5_000) continue;
+    const dt = (mr[i].t - mr[i - 1].t) / 1000;
+    if (dt > 0) perSecServer.push((mr[i].committed - mr[i - 1].committed) / dt);
+  }
+  const zeroCommitSeconds = perSecServer.filter((v) => v === 0).length;
+
+  // 메시지 1건당 서버 CPU 시간 (저부하 역전 확인용: 같은 일을 하는데 더 오래 걸리면 CPU가 느려진 것)
+  const received = ctx.appMetrics?.telemetry?.received ?? null;
+  const serverCpuSec = sp.length ? sp.reduce((a, r) => a + r.cpuPct / 100, 0) : null; // 1초 샘플 합
+  const cpuUsPerMsg = received && serverCpuSec !== null ? r1((serverCpuSec / received) * 1e6) : null;
 
   // 한계 판정
   const steadyBuckets = buckets.filter((b) => b.fromSec + BUCKET_SEC <= STAGE_SEC);
@@ -452,13 +522,17 @@ async function analyze(ctx) {
     label,
     stage,
     window: { simStart: new Date(simStart).toISOString(), simStop: new Date(simStop).toISOString() },
-    clock: ctx.clock,
+    clock: { start: ctx.clock, end: ctx.clockEnd, driftMs: ctx.clockEnd ? r1(ctx.clockEnd.offsetMs - ctx.clock.offsetMs) : null },
+    hostLoad: { start: ctx.loadStart, end: ctx.loadEnd },
     publishRate: { simLogAvg: steadyRate(ctx.simRates), nominal: r1((stage.sats * 1000) / stage.intervalMs) },
     storeRate: {
       serverLogAvg: steadyRate(ctx.srv.rates),
       dbTelemetryAvg: r1(avg(steadyCounts)),
       dbTelemetryMin: min(steadyCounts),
       dbTelemetryMax: max(steadyCounts),
+      serverCommitAvg: r1(avg(perSecServer)),
+      serverCommitMin: r1(min(perSecServer)),
+      zeroCommitSeconds,
       storedByStopRatio: lat.published_by_stop_stored ? r1((lat.stored_by_stop / lat.published_by_stop_stored) * 100) : null,
     },
     appMetrics: ctx.appMetrics,
@@ -471,7 +545,14 @@ async function analyze(ctx) {
     },
     buckets,
     catchUpMs,
+    catchUpServerMs,
+    catchUpDbMs,
     catchUpWaitMs: ctx.catchUpWaitMs,
+    lowLoadProbe: {
+      cpuUsPerMsg,
+      flushDurationMs: ctx.appMetrics?.flush?.durationMs ?? null,
+      flushAvgRows: ctx.appMetrics?.flush?.avgRows ?? null,
+    },
     counts: {
       published,
       stored: { telemetry: lat.n, events: evStored, alarms: alStored },
@@ -541,12 +622,15 @@ function summaryMd(env, results) {
   L.push(`- Node ${env.node}, PostgreSQL ${env.postgres.version} (${Object.entries(env.postgres.settings).map(([k, v]) => `${k}=${v}`).join(', ')})`);
   L.push(`- 단계 ${env.bench.stageSec}s, 휴식 ${env.bench.restSec}s`, '');
   L.push(`- 서버 설정: ${Object.entries(env.serverEnv).map(([k, v]) => `${k}=${v ?? '기본값'}`).join(', ')} / 단계마다 테이블 비움: ${env.bench.reset ? '예' : '아니오'}`, '');
-  L.push('| 단계 | 발행/s | 저장/s | 발행→수신 p50/p95/p99/max (ms) | 수신→저장 p50/p95/p99/max (ms) | 수신→커밋 p50/p95/p99/max (ms) | 따라잡기 | 유실 | 서버 CPU avg/max | heap max | EL p99 avg / max | 풀 대기 max | mosquitto CPU avg/max | postgres CPU avg/max | 테이블 +MiB | 판정 |');
-  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  L.push('| 단계 | 발행/s | 저장/s (서버 시계) | 커밋 0건인 초 | 수신→커밋 p50/p95/p99/max (ms) | 발행→수신 p50/p99 (ms) | 따라잡기 (서버 시계) | 유실 | 서버 CPU avg/max | CPU µs/msg | flush p50/p99 (ms) | heap max | EL p99 avg / max | 풀 대기 max | 버퍼 max | mosquitto CPU avg/max | postgres CPU avg/max | DB 시계 차 시작→끝 (ms) | 판정 |');
+  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const r of results) {
     if (r.aborted) { L.push(`| ${r.label} | 중단: ${r.aborted} |`); continue; }
-    const a = r.latencyMs.publishToReceive, b = r.latencyMs.receiveToInsert, c = r.latencyMs.receiveToCommit ?? {};
-    L.push(`| ${r.label} | ${r.publishRate.simLogAvg} | ${r.storeRate.dbTelemetryAvg} | ${a.p50}/${a.p95}/${a.p99}/${a.max} | ${b.p50}/${b.p95}/${b.p99}/${b.max} | ${c.p50 ?? '-'}/${c.p95 ?? '-'}/${c.p99 ?? '-'}/${c.max ?? '-'} | ${(r.catchUpMs / 1000).toFixed(2)}s | ${r.counts.lost.telemetry}${r.appMetrics?.telemetry?.dropped ? ` (역압 ${r.appMetrics.telemetry.dropped})` : ''} | ${r.server.cpuPctAvg}/${r.server.cpuPctMax}% | ${r.server.heapUsedMiBMax}MiB | ${r.server.eventLoopP99MsAvg}/${r.server.eventLoopMaxMs}ms | ${r.server.poolWaitingMax} | ${r.docker['gl-mosquitto'].cpuPctAvg}/${r.docker['gl-mosquitto'].cpuPctMax}% | ${r.docker['gl-postgres'].cpuPctAvg}/${r.docker['gl-postgres'].cpuPctMax}% | ${r.table.addedMiB} | ${r.verdict.limitReached ? '한계: ' + r.verdict.reasons.join('; ') : '통과'} |`);
+    const a = r.latencyMs.publishToReceive, c = r.latencyMs.receiveToCommit ?? {};
+    const f = r.lowLoadProbe?.flushDurationMs ?? {};
+    const d = r.appMetrics?.telemetry?.dropped;
+    const dk = (n) => `${r.docker[n].cpuPctAvg}/${r.docker[n].cpuPctMax}%${r.docker[n].excludedInvalid ? ` (제외 ${r.docker[n].excludedInvalid})` : ''}`;
+    L.push(`| ${r.label} | ${r.publishRate.simLogAvg} | ${r.storeRate.serverCommitAvg ?? r.storeRate.dbTelemetryAvg} | ${r.storeRate.zeroCommitSeconds ?? '-'} | ${c.p50 ?? '-'}/${c.p95 ?? '-'}/${c.p99 ?? '-'}/${c.max ?? '-'} | ${a.p50}/${a.p99} | ${(r.catchUpMs / 1000).toFixed(2)}s${r.catchUpServerMs === null ? ' (DB)' : ''} | ${r.counts.lost.telemetry}${d ? ` (역압 ${d})` : ''} | ${r.server.cpuPctAvg}/${r.server.cpuPctMax}% | ${r.lowLoadProbe?.cpuUsPerMsg ?? '-'} | ${f.p50 ?? '-'}/${f.p99 ?? '-'} | ${r.server.heapUsedMiBMax}MiB | ${r.server.eventLoopP99MsAvg}/${r.server.eventLoopMaxMs}ms | ${r.server.poolWaitingMax} | ${r.appMetrics?.buffer?.maxSize ?? '-'} | ${dk('gl-mosquitto')} | ${dk('gl-postgres')} | ${r.clock.start.offsetMs} → ${r.clock.end?.offsetMs ?? '-'} | ${r.verdict.limitReached ? '한계: ' + r.verdict.reasons.join('; ') : '통과'} |`);
   }
   return L.join('\n') + '\n';
 }

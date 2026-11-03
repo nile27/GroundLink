@@ -44,6 +44,18 @@ RESET=1 RUN_LABEL=baseline npm run bench   # 표준 절차: 빈 테이블에서 
 - 컨테이너: `docker stats` CPU%(코어 1개 = 100%), 메모리
 - 지연 튐: 초 단위로 묶어 e2e 최대가 250ms를 넘은 초의 목록
 
+## 측정 신뢰도 보완 (2026-11-03)
+
+- `docker stats` 샘플 중 불가능한 값(postgres > Docker CPU 수 × 100 %, mosquitto > 100 %)은 집계에서 뺀다. 뺀 개수는 `docker.<이름>.excludedInvalid`에 남는다
+- DB(Docker VM) 시계 차이를 단계 시작과 끝에 잰다 (`clock.start` / `clock.end` / `driftMs`)
+- **따라잡기는 서버 시계 기준**: `/metrics/ingest`의 `clock.lastCommittedAt - clock.lastPublishedTs`. 서버가 죽어 지표가 없을 때만 DB 기준(`catchUpDbMs`)을 쓴다
+- **초당 저장률은 서버 시계 기준**: `/metrics/ingest`를 1초마다 읽어 커밋 수 차분 (`storeRate.serverCommitAvg/Min`, 커밋 0건인 초 `zeroCommitSeconds`). DB 시계가 튀어서 생기는 빈 칸과 진짜 멈춤을 구분한다
+- 저부하 역전 확인용 (`lowLoadProbe`)
+  - `flushDurationMs`: 다중 행 INSERT 1회 시간. 같은 크기 배치(500행)끼리 비교하면 CPU·DB가 느려졌는지 보인다
+  - `cpuUsPerMsg`: 메시지 1건당 서버 CPU 시간 (고정 오버헤드가 섞여서 저부하에서는 크게 나온다)
+  - `hostLoad`: 단계 시작·끝의 호스트 load average와 스왑 사용량
+- 반복 비교: `node bench/compare.mjs <결과 폴더>...` → 같은 서버 설정끼리 묶어 단계별 평균(최소~최대)
+
 ## 한계 판정 (해당하면 남은 단계 생략)
 
 - 따라잡기 > 2초 (발행 중에 저장이 밀렸다)
