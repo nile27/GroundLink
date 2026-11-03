@@ -47,7 +47,7 @@ const SPIKE_MS = 250;
 /** 한계 판정 기준 */
 const LIMIT = {
   catchUpMs: 2000, // 마지막 발행 → 마지막 저장이 이보다 길면 "밀림"
-  growthFactor: 3, // 마지막 구간 e2e p50이 두 번째 구간의 3배 이상이고
+  growthFactor: 3, // 마지막 3개 구간 e2e p50이 계속 증가하고, 마지막이 두 번째 구간의 3배 이상이고
   growthMinMs: 200, //  200ms 이상이면 "지연 계속 증가"
 };
 
@@ -436,7 +436,11 @@ async function analyze(ctx) {
   const steadyBuckets = buckets.filter((b) => b.fromSec + BUCKET_SEC <= STAGE_SEC);
   const ref = steadyBuckets[1] ?? steadyBuckets[0];
   const lastB = steadyBuckets.at(-1);
-  const growing = !!(ref && lastB && lastB.e2eP50 > LIMIT.growthMinMs && lastB.e2eP50 > ref.e2eP50 * LIMIT.growthFactor);
+  // "계속 늘어나기만": 마지막 3개 구간 p50이 계속 증가하고, 마지막이 기준 구간의 3배 이상·200ms 이상
+  // (일시적인 멈춤 한 번으로 한계 판정이 나지 않게. 2026-11-03 새 기준선 3단계에서 오판정)
+  const lastThree = steadyBuckets.slice(-3);
+  const rising = lastThree.length === 3 && lastThree[0].e2eP50 < lastThree[1].e2eP50 && lastThree[1].e2eP50 < lastThree[2].e2eP50;
+  const growing = !!(rising && ref && lastB && lastB.e2eP50 > LIMIT.growthMinMs && lastB.e2eP50 > ref.e2eP50 * LIMIT.growthFactor);
   const behind = catchUpMs > LIMIT.catchUpMs;
   const reasons = [];
   if (behind) reasons.push(`따라잡기 ${(catchUpMs / 1000).toFixed(1)}s > ${LIMIT.catchUpMs / 1000}s`);
