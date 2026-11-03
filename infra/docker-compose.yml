@@ -1,9 +1,9 @@
-name: satellite-ground
+name: groundlink
 
 services:
   mosquitto:
     image: eclipse-mosquitto:2.0.22
-    container_name: sg-mosquitto
+    container_name: gl-mosquitto
     restart: unless-stopped
     ports:
       - "127.0.0.1:1883:1883"
@@ -13,7 +13,7 @@ services:
 
   postgres:
     image: postgres:17.11-alpine
-    container_name: sg-postgres
+    container_name: gl-postgres
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB}

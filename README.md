@@ -1,4 +1,4 @@
-# satellite-ground
+# GroundLink
 
 가상 위성 지상국 시스템 — 위성 시뮬레이터(TypeScript) → Mosquitto(MQTT) → NestJS 수집 서버 → PostgreSQL
 
