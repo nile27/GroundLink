@@ -29,6 +29,15 @@ class BufferDto {
 class FlushDto {
   @ApiProperty({ description: '다중 행 INSERT 횟수' }) count: number;
   @ApiProperty({ nullable: true, type: Number, description: 'INSERT 1회당 평균 행 수' }) avgRows: number | null;
+  @ApiProperty({ type: () => LatencySummaryDto, description: 'INSERT 1회 소요 시간 (커넥션 대기 포함, ms)' })
+  durationMs: LatencySummaryDto;
+}
+
+class ClockDto {
+  @ApiProperty({ nullable: true, type: Number, description: '마지막 텔레메트리 커밋 완료 시각 (서버 시계, epoch ms)' })
+  lastCommittedAt: number | null;
+  @ApiProperty({ nullable: true, type: Number, description: '커밋된 텔레메트리 중 가장 늦은 발행 시각 ts (epoch ms)' })
+  lastPublishedTs: number | null;
 }
 
 class IngestLatencyDto {
@@ -45,6 +54,7 @@ class IngestMetricsDto implements IngestMetricsSnapshot {
   @ApiProperty({ type: TelemetryCountsDto }) telemetry: TelemetryCountsDto;
   @ApiProperty({ type: BufferDto }) buffer: BufferDto;
   @ApiProperty({ type: FlushDto }) flush: FlushDto;
+  @ApiProperty({ type: ClockDto }) clock: ClockDto;
   @ApiProperty({ type: IngestLatencyDto }) latencyMs: IngestLatencyDto;
 }
 

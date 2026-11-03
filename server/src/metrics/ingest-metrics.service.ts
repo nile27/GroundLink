@@ -29,6 +29,15 @@ export interface IngestMetricsSnapshot {
     count: number;
     /** INSERT 1회당 평균 행 수 */
     avgRows: number | null;
+    /** INSERT 1회 소요 시간 (커넥션 대기 포함, ms) */
+    durationMs: LatencySummary;
+  };
+  /** 서버 시계 기준 시각 (epoch ms). 따라잡기 계산용 */
+  clock: {
+    /** 마지막 텔레메트리 커밋 완료 시각 */
+    lastCommittedAt: number | null;
+    /** 커밋된 텔레메트리 중 가장 늦은 발행 시각(ts) */
+    lastPublishedTs: number | null;
   };
   latencyMs: {
     /** 서버 수신 → INSERT 커밋 완료 (서버 시계만 사용) */
@@ -54,6 +63,9 @@ export class IngestMetricsService {
   private flushes = 0;
   private flushedRows = 0;
   private windowCommitted = 0;
+  private lastCommittedAt: number | null = null;
+  private lastPublishedTs: number | null = null;
+  private readonly flushDuration = new LatencyHistogram();
   private dropped = 0;
   private windowDropped = 0;
   private bufferLimit: number | null = null;
@@ -74,6 +86,8 @@ export class IngestMetricsService {
     this.total.receiveToCommit.record(committedAt - receivedAt);
     this.window.receiveToCommit.record(committedAt - receivedAt);
     this.total.publishToCommit.record(committedAt - publishedAt);
+    if (this.lastCommittedAt === null || committedAt > this.lastCommittedAt) this.lastCommittedAt = committedAt;
+    if (this.lastPublishedTs === null || publishedAt > this.lastPublishedTs) this.lastPublishedTs = publishedAt;
   }
 
   telemetryFailed(n = 1): void {
@@ -95,9 +109,10 @@ export class IngestMetricsService {
     if (n > this.maxBuffered) this.maxBuffered = n;
   }
 
-  flushed(rows: number): void {
+  flushed(rows: number, durationMs?: number): void {
     this.flushes++;
     this.flushedRows += rows;
+    if (durationMs !== undefined) this.flushDuration.record(durationMs);
   }
 
   get committedTotal(): number {
@@ -128,7 +143,12 @@ export class IngestMetricsService {
       uptimeSec: Math.round((Date.now() - this.startedAt.getTime()) / 1000),
       telemetry: { received: this.received, committed: this.committed, failed: this.failed, dropped: this.dropped },
       buffer: { limit: this.bufferLimit, overflowPolicy: this.overflowPolicy, size: this.buffered, maxSize: this.maxBuffered },
-      flush: { count: this.flushes, avgRows: this.flushes ? Math.round((this.flushedRows / this.flushes) * 10) / 10 : null },
+      flush: {
+        count: this.flushes,
+        avgRows: this.flushes ? Math.round((this.flushedRows / this.flushes) * 10) / 10 : null,
+        durationMs: this.flushDuration.summary(),
+      },
+      clock: { lastCommittedAt: this.lastCommittedAt, lastPublishedTs: this.lastPublishedTs },
       latencyMs: {
         receiveToCommit: this.total.receiveToCommit.summary(),
         publishToCommit: this.total.publishToCommit.summary(),

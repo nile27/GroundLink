@@ -134,11 +134,12 @@ export class TelemetryWriterService implements BeforeApplicationShutdown {
   }
 
   private async flush(batch: Pending[]): Promise<void> {
+    const startedAt = performance.now();
     try {
       await this.telemetry.insert(batch.map((p) => p.row));
       const committedAt = Date.now();
       for (const p of batch) this.metrics.telemetryCommitted(p.receivedAtMs, p.publishedAtMs, committedAt);
-      this.metrics.flushed(batch.length);
+      this.metrics.flushed(batch.length, performance.now() - startedAt);
     } catch (err) {
       this.metrics.telemetryFailed(batch.length);
       this.logger.error(`텔레메트리 ${batch.length}건 일괄 저장 실패: ${(err as Error).message}`);
