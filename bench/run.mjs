@@ -19,6 +19,7 @@ import { spawn, execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { createInterface } from 'node:readline/promises';
 import { promisify } from 'node:util';
 import pg from 'pg';
 
@@ -35,6 +36,11 @@ const STAGE_SEC = Number(process.env.STAGE_SEC ?? 180);
 const REST_SEC = Number(process.env.REST_SEC ?? 30);
 const MIN_FREE_GB = Number(process.env.MIN_FREE_GB ?? 5);
 const CATCHUP_MAX_SEC = Number(process.env.CATCHUP_MAX_SEC ?? 600);
+const RESET = process.env.RESET === '1';
+const RUN_LABEL = (process.env.RUN_LABEL ?? '').replace(/[^\w.-]/g, '');
+/** 서버 설정 중 결과에 같이 남길 환경변수 */
+const SERVER_ENV_KEYS = ['DB_POOL_SIZE', 'BATCH_SIZE', 'FLUSH_MS', 'MAX_BUFFER', 'OVERFLOW_POLICY'];
+const RESET_TABLES = ['telemetry', 'events', 'alarms'];
 const CATCHUP_IDLE_SEC = 15; // 저장 건수가 이 시간 동안 늘지 않으면 따라잡기 종료로 본다
 const BUCKET_SEC = 30;
 const SPIKE_MS = 250;
@@ -45,7 +51,7 @@ const LIMIT = {
   growthMinMs: 200, //  200ms 이상이면 "지연 계속 증가"
 };
 
-const runId = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+const runId = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + (RUN_LABEL ? `-${RUN_LABEL}` : '');
 const OUT = join(ROOT, 'bench', 'results', runId);
 mkdirSync(OUT, { recursive: true });
 
@@ -224,7 +230,8 @@ async function envInfo() {
     docker: { serverVersion: dockerInfo.ServerVersion, os: dockerInfo.OperatingSystem, cpus: dockerInfo.NCPU, memoryGiB: dockerInfo.MemTotal / 1024 ** 3 },
     node: process.version,
     postgres: { version: pgVer.server_version, settings: Object.fromEntries(pgSettings.map((s) => [s.name, s.setting + (s.unit ?? '')])) },
-    bench: { stages: STAGES, stageSec: STAGE_SEC, restSec: REST_SEC, limit: LIMIT, spikeMs: SPIKE_MS, bucketSec: BUCKET_SEC },
+    bench: { label: RUN_LABEL || null, reset: RESET, stages: STAGES, stageSec: STAGE_SEC, restSec: REST_SEC, limit: LIMIT, spikeMs: SPIKE_MS, bucketSec: BUCKET_SEC },
+    serverEnv: Object.fromEntries(SERVER_ENV_KEYS.map((k) => [k, process.env[k] ?? null])),
   };
 }
 
@@ -258,6 +265,10 @@ async function runStage(idx, stage) {
     pgLog: join(OUT, `${tag}-postgres.log`),
   };
 
+  if (RESET) {
+    await q(`TRUNCATE ${RESET_TABLES.join(', ')}`);
+    log(`TRUNCATE ${RESET_TABLES.join(', ')} 완료`);
+  }
   const before = await pgSnapshot();
   const clock = await clockOffsetMs();
 
@@ -295,6 +306,14 @@ async function runStage(idx, stage) {
   const catchUpWaitMs = Date.now() - simStop;
   log(`저장 ${stored}/${target} (대기 ${(catchUpWaitMs / 1000).toFixed(1)}s)`);
 
+  let appMetrics = null;
+  try {
+    const res = await fetch('http://127.0.0.1:3000/metrics/ingest');
+    if (res.ok) appMetrics = await res.json();
+  } catch {
+    log('서버 /metrics/ingest 응답 없음 (서버 종료됨?)');
+  }
+
   await sleep(2000);
   await stats.stop();
   await stopProc('server', server);
@@ -308,7 +327,7 @@ async function runStage(idx, stage) {
     log(`postgres 로그 수집 실패: ${err.message}`);
   }
 
-  return analyze({ tag, label, stage, files, before, after, clock, simStart, simStop, simRates, simTotals, srv, catchUpWaitMs, dockerSamples: stats.samples });
+  return analyze({ tag, label, stage, files, before, after, clock, simStart, simStop, simRates, simTotals, srv, catchUpWaitMs, appMetrics, dockerSamples: stats.samples });
 }
 
 async function analyze(ctx) {
@@ -438,7 +457,10 @@ async function analyze(ctx) {
       dbTelemetryMax: max(steadyCounts),
       storedByStopRatio: lat.published_by_stop_stored ? r1((lat.stored_by_stop / lat.published_by_stop_stored) * 100) : null,
     },
+    appMetrics: ctx.appMetrics,
     latencyMs: {
+      receiveToCommit: ctx.appMetrics?.latencyMs?.receiveToCommit ?? null,
+      publishToCommit: ctx.appMetrics?.latencyMs?.publishToCommit ?? null,
       publishToReceive: { p50: p50pr, p95: p95pr, p99: p99pr, max: r1(lat.pr_max) },
       receiveToInsert: { p50: p50ri, p95: p95ri, p99: p99ri, max: r1(lat.ri_max) },
       endToEnd: { p50: p50e, p95: p95e, p99: p99e, max: r1(lat.e2e_max) },
@@ -487,6 +509,22 @@ async function analyze(ctx) {
   return result;
 }
 
+/** RESET=1일 때 실행 전 확인. 'TRUNCATE'를 입력해야 진행한다 (파이프 입력도 허용) */
+async function confirmReset() {
+  const counts = [];
+  for (const t of RESET_TABLES) {
+    const [{ n }] = await q(`SELECT count(*)::bigint AS n FROM ${t}`);
+    counts.push(`${t} ${Number(n).toLocaleString()}행`);
+  }
+  console.log(`\n[확인] 각 단계를 시작하기 전에 다음 테이블을 TRUNCATE 합니다 (복구 불가): ${counts.join(', ')}`);
+  console.log('       satellites, commands, migrations 는 건드리지 않습니다.');
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  const answer = (await rl.question("       계속하려면 TRUNCATE 를 입력하세요: ").catch(() => '')).trim();
+  rl.close();
+  log(`비우기 확인 응답: "${answer}" (${counts.join(', ')})`);
+  return answer === 'TRUNCATE';
+}
+
 function min(a) {
   return a.length ? Math.min(...a) : null;
 }
@@ -498,12 +536,13 @@ function summaryMd(env, results) {
   L.push(`- Docker Desktop ${env.docker.serverVersion}: CPU ${env.docker.cpus}, 메모리 ${env.docker.memoryGiB.toFixed(2)}GiB`);
   L.push(`- Node ${env.node}, PostgreSQL ${env.postgres.version} (${Object.entries(env.postgres.settings).map(([k, v]) => `${k}=${v}`).join(', ')})`);
   L.push(`- 단계 ${env.bench.stageSec}s, 휴식 ${env.bench.restSec}s`, '');
-  L.push('| 단계 | 발행/s | 저장/s | 발행→수신 p50/p95/p99/max (ms) | 수신→저장 p50/p95/p99/max (ms) | 따라잡기 | 유실 | 서버 CPU avg/max | heap max | EL p99 avg / max | 풀 대기 max | mosquitto CPU avg/max | postgres CPU avg/max | 테이블 +MiB | 판정 |');
-  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
+  L.push(`- 서버 설정: ${Object.entries(env.serverEnv).map(([k, v]) => `${k}=${v ?? '기본값'}`).join(', ')} / 단계마다 테이블 비움: ${env.bench.reset ? '예' : '아니오'}`, '');
+  L.push('| 단계 | 발행/s | 저장/s | 발행→수신 p50/p95/p99/max (ms) | 수신→저장 p50/p95/p99/max (ms) | 수신→커밋 p50/p95/p99/max (ms) | 따라잡기 | 유실 | 서버 CPU avg/max | heap max | EL p99 avg / max | 풀 대기 max | mosquitto CPU avg/max | postgres CPU avg/max | 테이블 +MiB | 판정 |');
+  L.push('|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|');
   for (const r of results) {
     if (r.aborted) { L.push(`| ${r.label} | 중단: ${r.aborted} |`); continue; }
-    const a = r.latencyMs.publishToReceive, b = r.latencyMs.receiveToInsert;
-    L.push(`| ${r.label} | ${r.publishRate.simLogAvg} | ${r.storeRate.dbTelemetryAvg} | ${a.p50}/${a.p95}/${a.p99}/${a.max} | ${b.p50}/${b.p95}/${b.p99}/${b.max} | ${(r.catchUpMs / 1000).toFixed(2)}s | ${r.counts.lost.telemetry} | ${r.server.cpuPctAvg}/${r.server.cpuPctMax}% | ${r.server.heapUsedMiBMax}MiB | ${r.server.eventLoopP99MsAvg}/${r.server.eventLoopMaxMs}ms | ${r.server.poolWaitingMax} | ${r.docker['gl-mosquitto'].cpuPctAvg}/${r.docker['gl-mosquitto'].cpuPctMax}% | ${r.docker['gl-postgres'].cpuPctAvg}/${r.docker['gl-postgres'].cpuPctMax}% | ${r.table.addedMiB} | ${r.verdict.limitReached ? '한계: ' + r.verdict.reasons.join('; ') : '통과'} |`);
+    const a = r.latencyMs.publishToReceive, b = r.latencyMs.receiveToInsert, c = r.latencyMs.receiveToCommit ?? {};
+    L.push(`| ${r.label} | ${r.publishRate.simLogAvg} | ${r.storeRate.dbTelemetryAvg} | ${a.p50}/${a.p95}/${a.p99}/${a.max} | ${b.p50}/${b.p95}/${b.p99}/${b.max} | ${c.p50 ?? '-'}/${c.p95 ?? '-'}/${c.p99 ?? '-'}/${c.max ?? '-'} | ${(r.catchUpMs / 1000).toFixed(2)}s | ${r.counts.lost.telemetry} | ${r.server.cpuPctAvg}/${r.server.cpuPctMax}% | ${r.server.heapUsedMiBMax}MiB | ${r.server.eventLoopP99MsAvg}/${r.server.eventLoopMaxMs}ms | ${r.server.poolWaitingMax} | ${r.docker['gl-mosquitto'].cpuPctAvg}/${r.docker['gl-mosquitto'].cpuPctMax}% | ${r.docker['gl-postgres'].cpuPctAvg}/${r.docker['gl-postgres'].cpuPctMax}% | ${r.table.addedMiB} | ${r.verdict.limitReached ? '한계: ' + r.verdict.reasons.join('; ') : '통과'} |`);
   }
   return L.join('\n') + '\n';
 }
@@ -514,6 +553,11 @@ async function main() {
   const env = await envInfo();
   writeFileSync(join(OUT, 'env.json'), JSON.stringify(env, null, 2));
   log(`결과 폴더: ${OUT}`);
+  if (RESET && !(await confirmReset())) {
+    log('테이블 비우기 확인 안 됨 → 측정 취소');
+    await db.end();
+    return;
+  }
   log(`단계: ${STAGES.map((s) => `${s.sats}x${s.intervalMs}`).join(', ')} / 각 ${STAGE_SEC}s, 휴식 ${REST_SEC}s`);
 
   const results = [];
