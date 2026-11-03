@@ -64,6 +64,8 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
   }
 
   private async handle(topic: string, payload: Buffer): Promise<void> {
+    // 지연 측정 기준점: 파싱·검증·위성 등록보다 먼저 기록
+    const receivedAt = new Date();
     const parsed = parseTopic(topic);
     if (!parsed || parsed.kind === 'cmd') return;
 
@@ -88,6 +90,7 @@ export class IngestService implements OnModuleInit, OnModuleDestroy {
             rssi: msg.rssi,
             mode: msg.mode,
             sunlit: msg.sunlit,
+            receivedAt,
           });
           break;
 

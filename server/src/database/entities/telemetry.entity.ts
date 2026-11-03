@@ -42,7 +42,15 @@ export class Telemetry {
   @Column({ type: 'boolean' })
   sunlit: boolean;
 
-  @ApiProperty({ description: '서버 저장 시각' })
-  @CreateDateColumn({ name: 'received_at', type: 'timestamptz' })
-  receivedAt: Date;
+  @ApiProperty({
+    description: '서버가 MQTT 메시지를 받은 시각. 지연 측정용 (발행→수신 = receivedAt - ts). 컬럼 추가 전 행은 null',
+    nullable: true,
+    type: Date,
+  })
+  @Column({ name: 'received_at', type: 'timestamptz', nullable: true })
+  receivedAt: Date | null;
+
+  @ApiProperty({ description: 'DB 저장 시각 (DB 기본값 now()). 수신→저장 = insertedAt - receivedAt' })
+  @CreateDateColumn({ name: 'inserted_at', type: 'timestamptz' })
+  insertedAt: Date;
 }

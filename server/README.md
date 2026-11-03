@@ -60,7 +60,7 @@ npm run migration:generate -- src/database/migrations/<이름>   # 엔티티 변
 | 테이블 | 내용 |
 |---|---|
 | `satellites` | 처음 보는 위성을 자동 등록 |
-| `telemetry` | 텔레메트리. 인덱스 `(sat_id, ts)` |
+| `telemetry` | 텔레메트리. 인덱스 `(sat_id, ts)`. 지연 측정: `received_at`(서버 수신, 앱이 기록), `inserted_at`(DB 저장, `DEFAULT now()`) |
 | `events` | 이벤트. 인덱스 `(sat_id, ts)` |
 | `alarms` | 알람. 인덱스 `(ts)` |
 | `commands` | 명령과 ack 결과 (`id` = MQTT `cmdId`). 상태 `PENDING` → `SUCCESS` / `FAILED` / `TIMEOUT` |
