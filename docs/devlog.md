@@ -151,18 +151,37 @@
 ## 2026-11-03 — 프로젝트 정리 & CLAUDE.md
 
 - 프로젝트 이름을 GroundLink로 변경
-  - compose 프로젝트 `groundlink`
-  - 컨테이너 `gl-mosquitto`, `gl-postgres`
+  - README 제목 `satellite-ground` → `GroundLink`
+  - compose 프로젝트 `satellite-ground` → `groundlink`
+  - 컨테이너 `sg-mosquitto` / `sg-postgres` → `gl-mosquitto` / `gl-postgres`
   - 볼륨 `groundlink_*`
-- CLAUDE.md 작성: 구조, 데이터 흐름, MQTT 토픽, 원칙
+- 새 이름으로 재기동 후 재검증: 컨테이너 Up (postgres healthy), MQTT pub/sub, `SELECT 1` 성공
+- CLAUDE.md 작성: 구조, 데이터 흐름, MQTT 토픽, 원칙, 실행 방법
+
+### 결정 & 이유
+- 볼륨을 `groundlink_*`로 새로 시작: compose 프로젝트 이름이 볼륨 이름 앞에 붙어서, 이름을 바꾸면 새 볼륨이 생긴다. DB에 실제 데이터가 없어서 옛 볼륨은 이어 쓰지 않음 (옛 볼륨은 승인 후 삭제)
+- 클라이언트(WPF, React)는 server API로만 통신하고 DB·브로커에 직접 붙지 않음
+- TypeORM 사용, DB 전용 문법 최소화 (나중에 SQL Server로 바꿀 수 있게)
+
+### 주의
+- compose의 `name:`을 바꾸면 볼륨·네트워크 이름도 같이 바뀐다. 바꾸기 전에 볼륨을 옮길지부터 정할 것
 
 ---
 
 ## 2026-11-03 — 환경설정 & 인프라
 
-- 개발 환경: Node v24 (LTS), npm 11, @nestjs/cli 12, Docker 29 / Compose v5
-- 인프라: `eclipse-mosquitto:2.0.22`, `postgres:17.11-alpine`
+- 개발 환경: Apple Silicon(arm64), Homebrew 6.0, Git 2.39, Node v24.19 (LTS, nvm) / npm 11.17, @nestjs/cli 12.0.11 (전역), Docker 29.5 / Compose v5.1
+- 인프라: `eclipse-mosquitto:2.0.22`, `postgres:17.11-alpine` (docker compose)
   - 포트는 127.0.0.1에만 바인딩
   - postgres healthcheck
   - named volume
-- 검증: MQTT pub/sub, `SELECT 1` 성공
+- 검증: MQTT pub/sub(`test/hello`), psql `SELECT 1` 성공
+
+### 결정 & 이유
+- Node 버전 관리는 fnm을 새로 깔지 않고 기존 nvm 유지: 둘 다 쓰면 PATH가 충돌할 수 있음
+- PostgreSQL 18 대신 17: 18부터 데이터 디렉터리 경로 규칙이 바뀜. 볼륨 설정을 단순하게 유지
+- Mosquitto 2.1 대신 2.0.22: 2.0 안정 라인
+
+### 주의
+- mosquitto 로그의 `chown: ... Read-only file system` 경고는 conf를 `:ro`로 마운트해서 생김. 동작에는 문제 없음
+- `infra/.env`의 비밀번호를 바꾸면 기존 볼륨에는 반영되지 않는다. 볼륨을 새로 만들어야 함 (`down -v`는 데이터 삭제라 승인 필요)
