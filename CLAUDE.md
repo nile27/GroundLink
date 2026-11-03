@@ -39,3 +39,22 @@ simulator → Mosquitto → server → PostgreSQL
 ## 실행
 - 인프라: cd infra && docker compose up -d
 - 종료: cd infra && docker compose down (볼륨은 유지됨)
+
+## Git 규칙
+- 원격: https://github.com/nile27/GroundLink.git (main)
+- Conventional Commits (feat:, fix:, perf:, refactor:, test:, docs:, chore:)
+- 커밋은 작업 단위별로 분리
+- perf: 커밋에는 개선 전/후 수치 포함
+- 성능 개선 전 기준선 태그: v0.1-baseline
+- 커밋 전 .env, node_modules, dist, 로그, DB 데이터 포함 여부 확인
+- 새 도구·언어 추가 시 빌드 산출물, 캐시 폴더를 .gitignore에 먼저 반영
+- 작업이 끝나면 docs/devlog.md에 기록
+
+## 금지 사항
+- git push 금지 (사용자가 직접 함)
+- git push --force, git reset --hard, 이력 재작성 금지
+- .env, 비밀번호, 토큰 커밋·하드코딩 금지
+- docker compose down -v 등 볼륨 삭제 금지. 필요하면 이유 설명 후 승인
+- sudo 금지. 필요하면 멈추고 안내
+- 파일 영구 삭제 금지. 목록 보여주고 승인받기
+- 요청받지 않은 범위의 코드 작성 금지
