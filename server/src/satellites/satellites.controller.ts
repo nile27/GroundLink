@@ -32,7 +32,8 @@ export class SatellitesController {
   @HttpCode(202)
   @ApiAcceptedResponse({
     type: Command,
-    description: '명령을 발행했고 PENDING 상태로 기록함. ack가 오면 SUCCESS/FAILED로 갱신된다',
+    description:
+      '명령을 발행했고 PENDING 상태로 기록함. ack가 오면 SUCCESS/FAILED, COMMAND_TIMEOUT_MS(기본 10초) 안에 오지 않으면 TIMEOUT으로 갱신된다',
   })
   @ApiNotFoundResponse({ description: '위성 없음' })
   async sendCommand(@Param('id') id: string, @Body() dto: CreateCommandDto): Promise<Command> {

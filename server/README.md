@@ -26,6 +26,7 @@ cd server && npm run start:dev
 | `HOST` / `PORT` | `127.0.0.1` / `3000` |
 | `MQTT_URL` | `mqtt://127.0.0.1:1883` |
 | `DB_HOST` / `DB_PORT` | `127.0.0.1` / `5432` |
+| `COMMAND_TIMEOUT_MS` | `10000` (ack가 이 시간 안에 안 오면 `TIMEOUT`) |
 
 ## 마이그레이션
 
@@ -50,7 +51,7 @@ npm run migration:generate -- src/database/migrations/<이름>   # 엔티티 변
 | GET | `/health` | DB·MQTT 연결 상태 |
 | GET | `/satellites` | 위성 목록 + 각 위성 최신 텔레메트리 |
 | GET | `/satellites/:id/telemetry?from=&to=&limit=` | 텔레메트리 (최신순, from/to는 ISO 8601 또는 epoch ms, limit 기본 100·최대 1000) |
-| POST | `/satellites/:id/commands` | `{"type":"SET_MODE","mode":"SAFE"}` → 202 + PENDING 명령. ack가 오면 SUCCESS/FAILED로 갱신 |
+| POST | `/satellites/:id/commands` | `{"type":"SET_MODE","mode":"SAFE"}` → 202 + PENDING 명령. ack가 오면 SUCCESS/FAILED, 시간 안에 안 오면 TIMEOUT |
 | GET | `/satellites/:id/commands?limit=` | 명령 이력과 ack 결과 |
 | GET | `/alarms?limit=` | 최근 알람 (기본 50·최대 500) |
 
@@ -62,7 +63,7 @@ npm run migration:generate -- src/database/migrations/<이름>   # 엔티티 변
 | `telemetry` | 텔레메트리. 인덱스 `(sat_id, ts)` |
 | `events` | 이벤트. 인덱스 `(sat_id, ts)` |
 | `alarms` | 알람. 인덱스 `(ts)` |
-| `commands` | 명령과 ack 결과 (`id` = MQTT `cmdId`) |
+| `commands` | 명령과 ack 결과 (`id` = MQTT `cmdId`). 상태 `PENDING` → `SUCCESS` / `FAILED` / `TIMEOUT` |
 
 ## 구조
 
@@ -73,7 +74,7 @@ src/
 ├─ config/env.ts           .env 파일 경로 (server/.env → infra/.env)
 ├─ mqtt/                   mqtt.js 래퍼 서비스 (연결·구독·발행)
 ├─ ingest/                 MQTT 수신 → 메시지 1건당 INSERT 1건, 10초마다 저장률 로그
-├─ commands/               명령 기록·발행, ack 반영
+├─ commands/               명령 기록·발행, ack 반영, ack 타임아웃 (재시작 시 남은 PENDING 정리)
 ├─ satellites/             /satellites API
 ├─ alarms/                 /alarms API
 ├─ health/                 /health

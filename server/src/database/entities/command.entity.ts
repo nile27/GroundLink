@@ -3,7 +3,8 @@ import { COMMAND_TYPES, type CommandType } from '@groundlink/shared';
 import { Column, CreateDateColumn, Entity, Index, JoinColumn, ManyToOne, PrimaryColumn } from 'typeorm';
 import { Satellite } from './satellite.entity';
 
-export const COMMAND_STATUSES = ['PENDING', 'SUCCESS', 'FAILED'] as const;
+/** TIMEOUT: COMMAND_TIMEOUT_MS 안에 ack가 오지 않음 */
+export const COMMAND_STATUSES = ['PENDING', 'SUCCESS', 'FAILED', 'TIMEOUT'] as const;
 export type CommandStatus = (typeof COMMAND_STATUSES)[number];
 
 @Entity('commands')
@@ -33,7 +34,7 @@ export class Command {
   @Column({ type: 'varchar', length: 16, default: 'PENDING' })
   status: CommandStatus;
 
-  @ApiProperty({ required: false, nullable: true, type: String, description: 'ack 메시지' })
+  @ApiProperty({ required: false, nullable: true, type: String, description: 'ack 메시지 또는 실패·타임아웃 사유' })
   @Column({ name: 'result_message', type: 'varchar', length: 255, nullable: true })
   resultMessage: string | null;
 
