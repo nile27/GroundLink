@@ -4,6 +4,45 @@
 
 ---
 
+## 2026-11-07 — dashboard workspace 추가 (Vite React 템플릿)
+
+작업 브랜치 `dev`. 화면 코드는 아직 없음 (템플릿 그대로, 직접 작성 예정).
+
+### 한 일
+- `npm create vite@latest dashboard -- --template react-ts --no-immediate --no-interactive` (create-vite 9.3.4)
+  - `dashboard/src` 템플릿 코드는 수정하지 않음
+- 루트 `package.json`
+  - workspaces에 `dashboard` 추가
+  - scripts에 `dev:dashboard`, `build:dashboard` 추가
+  - 기존 `build`는 그대로 둬서 dashboard는 포함되지 않음
+- 의존성 정확한 버전 고정
+  - 템플릿이 써 준 `^`/`~`는 `.npmrc`의 `save-exact`가 적용되지 않음 (`npm install <pkg>`로 추가할 때만 적용)
+  - 그래서 설치된 버전으로 직접 바꿈
+  - react·react-dom 19.3.1, vite 8.3.6, @vitejs/plugin-react 6.2.1, typescript 7.0.2, oxlint 1.92.0, @types/react·@types/react-dom 19.3.0, @types/node 24.19.2
+- `.gitignore`: `vite.config.*.timestamp-*` 추가 (설정 번들 임시 파일)
+  - dist, dist-ssr, *.local, node_modules(.vite, .tmp 캐시 포함)는 이미 무시됨 (dashboard/.gitignore 템플릿과 루트 규칙)
+- CLAUDE.md 구조 섹션 갱신
+
+### 결정 & 이유
+- **tsconfig**: dashboard는 템플릿 tsconfig를 그대로 쓰고 `tsconfig.base.json`을 extends하지 않음
+  - base는 Node용 설정(nodenext, types node, DOM lib 없음)이라 브라우저 앱과 맞지 않음
+- **TypeScript 버전이 둘**: dashboard만 템플릿 기본인 TypeScript 7.0.2를 씀
+  - 루트 6.0.3은 `@nestjs/swagger`의 peer 범위 때문에 올릴 수 없음
+  - npm이 7.0.2를 `dashboard/node_modules`에만 설치함. 확인 결과 루트 tsc 6.0.3, dashboard tsc 7.0.2
+- **shared는 dashboard 의존성에 넣지 않음**: 클라이언트는 Swagger 문서 기준으로 통신함
+
+### 검증
+- `npm run dev:dashboard`: http://localhost:5173 200, `/src/main.tsx` 200 → 확인 후 종료, 5173 포트 비어 있음
+- `npm run build:dashboard` 성공 (`tsc -b && vite build`, JS 222 kB / gzip 69 kB)
+- 루트 `npm run build` 성공 (shared → simulator, server)
+- `npm install` 취약점 0건. `@scarf/scarf` postinstall 미허용 경고는 그대로 (이전부터 있던 것)
+
+### 남은 문제 (확인만 하고 손대지 않음)
+- **CORS**: 서버에 CORS 설정이 없음. dashboard에서 API를 부르려면 Vite 개발 프록시나 서버 CORS가 필요함
+- **API 경로**: 서버에 전역 prefix가 없음. API 경로는 `/satellites` 등이고, Swagger만 `/api/docs`에 있음
+
+---
+
 ## 2026-11-04 — bench 신뢰도 보완, 개선 C(풀 크기) 측정
 
 작업 브랜치 `dev`. 사용자가 자는 동안 진행. 승인이 필요한 작업은 하지 않고 아래 "하지 않은 것"에 남김.
