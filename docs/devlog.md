@@ -4,6 +4,48 @@
 
 ---
 
+## 2026-11-07 — dashboard 1단계: Tailwind 설치, 화면 뼈대 (목업)
+
+작업 브랜치 `dev`. 구조만 만들었고 동작·색·디자인은 다음 단계.
+
+### 한 일
+- **Tailwind CSS** (7275185)
+  - `npm install tailwindcss@4.3.5 @tailwindcss/vite@4.3.5 -w dashboard`: 정확한 버전으로 기록됨
+  - 공식 Vite 가이드대로 `vite.config.ts`에 `tailwindcss()` 플러그인 추가
+  - `index.css`에는 `@import "tailwindcss";`만 남김
+- **화면 뼈대** (b80452b), WPF 버전과 같은 구성
+  - 상단 요약 바: 전체 / 경고 / SAFE / 교신 중
+  - 왼쪽 위성 카드: ID, 배터리, 온도, 모드, 교신 점
+  - 오른쪽 선택 위성 상세: 최신 값, 모드 전환 버튼, 기간 버튼(1분/1시간/24시간), 배터리 차트 자리, 최소·최대·평균 자리
+  - 하단 알람 표
+  - 컴포넌트는 `src/components/`에 나눔: SummaryBar, SatelliteList, SatelliteCard, SatelliteDetail, AlarmTable
+  - 템플릿 `App.css` 삭제
+- **목업 데이터** (`src/mocks/data.ts`): 위성 6대, 알람 3건
+  - 경고(SAFE + 배터리 15.2), 교신 중 2대, 텔레메트리 없음 1대 포함
+- **목업 타입** (`src/types/api.ts`): 서버 응답 필드명에 맞춤
+  - `GET /satellites`: `server/src/satellites/dto/satellite-summary.dto.ts`, `satellites.service.ts`(listWithLatest), `database/entities/telemetry.entity.ts`
+  - `GET /alarms`: `server/src/alarms/alarms.controller.ts`, `database/entities/alarm.entity.ts`
+- **판정 함수**: `src/lib/status.ts`의 `getSatStatus()` 하나에 모음
+  - 경고 = SAFE 또는 battery < 20
+  - 교신 = rssi != null
+- **data-\* 속성**: `data-warning`, `data-contact`, `data-selected`. 다음 단계에서 `data-[...]:` 변형으로 색을 입힘
+
+### 결정 & 이유
+- 클릭, 기간 선택, 모드 전환은 버튼만 둠. 선택 위성은 첫 번째로 고정
+- 날짜는 JSON에서 문자열이 되므로 목업 타입에서 `string`(ISO 8601)으로 둠. bigint id도 문자열
+- shared 패키지는 쓰지 않고, 서버 enum 값(`NORMAL|SAFE` 등)을 타입에 직접 적음
+
+### 검증
+- `npm run build:dashboard` 성공, 루트 `npm run build` 성공
+- `npm run dev:dashboard`: 5173 응답 200. 헤드리스 Chrome으로 렌더링을 확인한 뒤 종료함
+  - 요약: 전체 6 / 경고 1 / SAFE 1 / 교신 중 2
+  - `data-selected="true"` 1개
+
+### 확인 못 한 것
+- 실제 서버를 띄워 JSON을 받아 비교하지는 않음. 엔티티·DTO 코드만 보고 맞춤
+
+---
+
 ## 2026-11-07 — dashboard workspace 추가 (Vite React 템플릿)
 
 작업 브랜치 `dev`. 화면 코드는 아직 없음 (템플릿 그대로, 직접 작성 예정).
