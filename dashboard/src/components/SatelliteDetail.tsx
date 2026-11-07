@@ -1,3 +1,4 @@
+import { RANGES, type RangeKey } from '../lib/ranges';
 import { getSatStatus } from '../lib/status';
 import { summarize } from '../lib/summary';
 import type { BatteryPoint, SatelliteSummary } from '../types/api';
@@ -8,16 +9,12 @@ import { ModeBadge } from './ModeBadge';
 interface Props {
   satellite: SatelliteSummary;
   batterySeries: BatteryPoint[];
+  range: RangeKey;
+  onRangeChange: (range: RangeKey) => void;
+  onToggleMode: () => void;
 }
 
-/** 기간 선택 버튼 (동작은 다음 단계) */
-const RANGES = [
-  { key: '1m', label: '최근 1분' },
-  { key: '1h', label: '1시간' },
-  { key: '24h', label: '24시간' },
-] as const;
-
-export function SatelliteDetail({ satellite, batterySeries }: Props) {
+export function SatelliteDetail({ satellite, batterySeries, range, onRangeChange, onToggleMode }: Props) {
   const t = satellite.latestTelemetry;
   const { warning, contact } = getSatStatus(t);
   const summary = summarize(batterySeries);
@@ -51,8 +48,13 @@ export function SatelliteDetail({ satellite, batterySeries }: Props) {
             {t ? (contact ? '교신 중' : '교신 없음') : '텔레메트리 없음'}
           </span>
         </div>
-        {/* 모드 전환 (동작은 다음 단계) */}
-        <button type="button" className="rounded-md border border-gray-300 px-3 py-1.5 text-sm">
+        {/* 모드 전환: 목업 상태의 mode만 바꾼다. 텔레메트리 없으면 비활성 */}
+        <button
+          type="button"
+          onClick={onToggleMode}
+          disabled={!t}
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
+        >
           {t?.mode === 'SAFE' ? 'NORMAL로 전환' : 'SAFE로 전환'}
         </button>
       </header>
@@ -77,10 +79,17 @@ export function SatelliteDetail({ satellite, batterySeries }: Props) {
         <div className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <h3 className="text-sm font-semibold text-gray-500">배터리 추이</h3>
-            {/* 기간 선택 (동작은 다음 단계) */}
+            {/* 기간 선택: 선택된 버튼은 data-selected */}
             <div className="flex overflow-hidden rounded-md border border-gray-300 text-sm">
               {RANGES.map((r) => (
-                <button key={r.key} type="button" className="border-l border-gray-300 px-3 py-1 first:border-l-0">
+                <button
+                  key={r.key}
+                  type="button"
+                  onClick={() => onRangeChange(r.key)}
+                  aria-pressed={r.key === range}
+                  data-selected={r.key === range}
+                  className="border-l border-gray-300 px-3 py-1 first:border-l-0 data-[selected=true]:bg-selected data-[selected=true]:text-white"
+                >
                   {r.label}
                 </button>
               ))}

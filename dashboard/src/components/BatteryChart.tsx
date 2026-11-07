@@ -6,22 +6,25 @@ interface Props {
   data: BatteryPoint[];
 }
 
-function formatTime(iso: string): string {
+function formatTime(iso: string, withSeconds: boolean): string {
   const d = new Date(iso);
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  const hm = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  return withSeconds ? `${hm}:${String(d.getSeconds()).padStart(2, '0')}` : hm;
 }
 
 /** avg는 선, min~max는 범위(면). y축 0~100%, 경고 기준선 20% */
 export function BatteryChart({ data }: Props) {
   const rows = data.map((p) => ({ ...p, range: [p.min, p.max] as [number, number] }));
+  // 구간 간격이 1분보다 짧으면(최근 1분) 초까지 표시
+  const withSeconds = data.length > 1 && new Date(data[1].t).getTime() - new Date(data[0].t).getTime() < 60_000;
 
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ComposedChart data={rows} margin={{ top: 8, right: 16, bottom: 0, left: -16 }}>
         <CartesianGrid stroke="#e5e7eb" vertical={false} />
-        <XAxis dataKey="t" tickFormatter={formatTime} fontSize={12} />
+        <XAxis dataKey="t" tickFormatter={(v) => formatTime(String(v), withSeconds)} fontSize={12} />
         <YAxis domain={[0, 100]} ticks={[0, 20, 40, 60, 80, 100]} unit="%" fontSize={12} />
-        <Tooltip labelFormatter={(v) => formatTime(String(v))} />
+        <Tooltip labelFormatter={(v) => formatTime(String(v), withSeconds)} />
         <Area
           dataKey="range"
           name="최소~최대"

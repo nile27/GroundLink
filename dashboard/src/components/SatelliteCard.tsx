@@ -6,18 +6,23 @@ import { ModeBadge } from './ModeBadge';
 interface Props {
   satellite: SatelliteSummary;
   selected: boolean;
+  onSelect: (id: string) => void;
 }
 
-export function SatelliteCard({ satellite, selected }: Props) {
+export function SatelliteCard({ satellite, selected, onSelect }: Props) {
   const t = satellite.latestTelemetry;
   const { warning, contact } = getSatStatus(t);
 
   return (
-    <div
+    // button: Tab으로 이동, Enter/Space로 선택 (브라우저 기본 동작)
+    <button
+      type="button"
+      onClick={() => onSelect(satellite.id)}
+      aria-pressed={selected}
       data-warning={warning}
       data-contact={contact}
       data-selected={selected}
-      className="flex flex-col gap-2 rounded-lg border border-gray-200 bg-white p-3 data-[selected=true]:ring-2 data-[selected=true]:ring-selected data-[warning=true]:border-warning data-[warning=true]:bg-warning-bg"
+      className="flex w-full flex-col gap-2 rounded-lg border text-left border-gray-200 bg-white p-3 data-[selected=true]:ring-2 data-[selected=true]:ring-selected data-[warning=true]:border-warning data-[warning=true]:bg-warning-bg"
     >
       <div className="flex items-center justify-between">
         <span className="font-semibold">{satellite.id}</span>
@@ -36,6 +41,6 @@ export function SatelliteCard({ satellite, selected }: Props) {
       ) : (
         <div className="text-sm text-muted">텔레메트리 없음</div>
       )}
-    </div>
+    </button>
   );
 }
