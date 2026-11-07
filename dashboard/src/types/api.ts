@@ -1,54 +1,26 @@
 /**
- * 서버 REST 응답 타입 (목업용). 필드명은 서버 코드 기준:
- * - Telemetry:        server/src/database/entities/telemetry.entity.ts
- * - SatelliteSummary: server/src/satellites/dto/satellite-summary.dto.ts (GET /satellites)
- * - Alarm:            server/src/database/entities/alarm.entity.ts      (GET /alarms)
- * JSON으로 오므로 Date 컬럼은 ISO 8601 문자열, bigint id는 문자열.
+ * 서버 REST 응답 타입. openapi.d.ts(생성 파일, npm run gen:api -w dashboard)의 별칭.
+ * 손으로 고치지 말고 서버 Swagger 데코레이터를 고친 뒤 다시 생성한다.
  */
+import type { components } from './openapi';
 
-export type SatMode = 'NORMAL' | 'SAFE';
-export type AlarmType = 'BATTERY_LOW' | 'TEMP_HIGH' | 'TEMP_LOW';
-export type AlarmSeverity = 'WARNING' | 'CRITICAL';
+type Schemas = components['schemas'];
 
-export interface Telemetry {
-  id: string;
-  satId: string;
-  ts: string;
-  battery: number;
-  temp: number;
-  rssi: number | null;
-  mode: SatMode;
-  sunlit: boolean;
-  receivedAt: string | null;
-  insertedAt: string;
-}
+/** GET /satellites 의 latestTelemetry */
+export type Telemetry = Schemas['Telemetry'];
+/** GET /satellites 항목 */
+export type SatelliteSummary = Schemas['SatelliteSummaryDto'];
+/** GET /satellites/stats */
+export type SatelliteStats = Schemas['SatelliteStatsDto'];
+/** GET /alarms 항목 */
+export type Alarm = Schemas['Alarm'];
+/** GET /satellites/:id/telemetry/summary 항목 (배터리 차트 한 점) */
+export type BatteryPoint = Schemas['TelemetrySummaryPointDto'];
+/** POST /satellites/:id/commands 요청 본문 */
+export type CreateCommand = Schemas['CreateCommandDto'];
+/** POST /satellites/:id/commands 응답 */
+export type Command = Schemas['Command'];
 
-export interface SatelliteSummary {
-  id: string;
-  name: string | null;
-  createdAt: string;
-  latestTelemetry: Telemetry | null;
-}
-
-export interface Alarm {
-  id: string;
-  satId: string;
-  ts: string;
-  type: AlarmType;
-  severity: AlarmSeverity;
-  value: number;
-  threshold: number;
-  message: string;
-  receivedAt: string;
-}
-
-/**
- * 배터리 차트 한 점 (구간 요약). 아직 서버에 없는 응답 형태 — summary API를 만들 때 맞출 것.
- * t: 구간 시작 시각 (ISO 8601), min/max/avg: 구간 안 배터리 (%)
- */
-export interface BatteryPoint {
-  t: string;
-  min: number;
-  max: number;
-  avg: number;
-}
+export type SatMode = Telemetry['mode'];
+export type AlarmType = Alarm['type'];
+export type AlarmSeverity = Alarm['severity'];
