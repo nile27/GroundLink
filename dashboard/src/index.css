@@ -1,1 +1,23 @@
 @import "tailwindcss";
+
+/*
+ * 의미 이름 색. 상태 표시는 data-* 속성 + data-[...] 변형으로 입힌다.
+ * static: 차트(Recharts)에서 var(--color-*)로 쓰므로 클래스에서 안 쓰여도 변수를 항상 출력
+ */
+@theme static {
+  --color-warning: #dc2626;
+  --color-warning-bg: #fef2f2;
+  --color-safe: #ea580c;
+  --color-safe-bg: #fff7ed;
+  --color-contact: #16a34a;
+  --color-muted: #9ca3af;
+  --color-selected: #2563eb;
+
+  /* 알람 severity (ALARM_SEVERITIES: WARNING, CRITICAL) */
+  --color-sev-critical: #dc2626;
+  --color-sev-warning: #d97706;
+
+  /* 배터리 차트 */
+  --color-chart-avg: #2563eb;
+  --color-chart-range: #93c5fd;
+}
