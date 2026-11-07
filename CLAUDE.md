@@ -9,7 +9,10 @@
 - simulator: 위성 시뮬레이터 (Node + TypeScript, mqtt.js)
 - infra: Docker Compose (Mosquitto, PostgreSQL)
 - server: NestJS 수집 서버. MQTT 구독 → DB 저장, REST API, 표준 WebSocket(@nestjs/platform-ws)
-- 추가 예정: dashboard (React), monitor (C# WPF, 윈도우 전용)
+- dashboard: React 대시보드 (Vite react-ts 템플릿, npm workspace). 템플릿 tsconfig 사용(tsconfig.base.json 미사용), TypeScript 7.0.2 (다른 workspace는 6.0.3)
+  - 실행: npm run dev:dashboard (http://localhost:5173) / 빌드: npm run build:dashboard
+  - 루트 npm run build에는 포함되지 않음
+- 추가 예정: monitor (C# WPF, 윈도우 전용)
 
 ## 데이터 흐름
 ```

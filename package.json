@@ -5,13 +5,16 @@
   "workspaces": [
     "shared",
     "simulator",
-    "server"
+    "server",
+    "dashboard"
   ],
   "scripts": {
     "build": "npm run build -w shared && npm run build -w simulator -w server",
     "start:server": "npm run start -w server",
     "start:sim": "npm run start -w simulator",
-    "bench": "node bench/run.mjs"
+    "bench": "node bench/run.mjs",
+    "dev:dashboard": "npm run dev -w dashboard",
+    "build:dashboard": "npm run build -w dashboard"
   },
   "engines": {
     "node": ">=24"
