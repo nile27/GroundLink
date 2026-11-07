@@ -7,6 +7,9 @@ import { AppModule } from './app.module';
 async function bootstrap(): Promise<void> {
   const app = await NestFactory.create(AppModule);
   app.enableShutdownHooks(); // SIGINT/SIGTERM → MQTT·DB 연결 정리
+  // 브라우저 클라이언트: dashboard 개발 서버(Vite)만 허용.
+  // 배열로 주면 요청 Origin이 목록에 있을 때만 Access-Control-Allow-Origin을 보낸다 (문자열이면 항상 보냄)
+  app.enableCors({ origin: ['http://localhost:5173'] });
   app.useGlobalPipes(new ValidationPipe({ transform: true, whitelist: true, forbidNonWhitelisted: true }));
 
   const doc = new DocumentBuilder()
