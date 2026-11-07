@@ -4,6 +4,86 @@
 
 ---
 
+## 2026-11-07 — server: /satellites N+1 제거, summary·stats API, CORS
+
+작업 브랜치 `dev`. 마이그레이션, 인덱스 추가, 설치는 없음. 기존 인덱스 `idx_telemetry_sat_ts (sat_id, ts)`로 충분함.
+
+### 측정 조건
+- DB: 위성 4000대, telemetry 약 354만 행 (부하 측정 때 쌓인 데이터)
+- 시뮬레이터 실행 중 (10대, 1초 주기)
+- 측정 방식: curl `time_total`. 워밍업 1회는 버리고 7회 측정
+
+### 1) GET /satellites N+1 제거 (0cbc126, perf)
+- 이전: 위성 목록 1건 + 위성마다 최신 텔레메트리 1건 = 쿼리 4001건
+- 이후: 쿼리 1건 `LEFT JOIN LATERAL (… ORDER BY ts DESC LIMIT 1)`
+- 응답 시간
+
+| | 평균 | 중앙값 | 최소 | 최대 |
+|---|---|---|---|---|
+| 이전 (N+1) | 0.971 s | 0.945 s | 0.687 s | 1.208 s |
+| 이후 (LATERAL) | 0.077 s | 0.076 s | 0.073 s | 0.089 s |
+
+- 약 12.6배 빨라짐. 응답 크기는 1.22 MB로 같음
+- EXPLAIN ANALYZE
+  - LATERAL: 76 ms. Nested Loop Left Join 안에서 `idx_telemetry_sat_ts`를 역순으로 1행씩, 4000회 읽음
+  - DISTINCT ON(비교용): 8,205 ms. 354만 행 전체를 인덱스로 훑음 → 쓰지 않음
+- 응답이 같은지 확인
+  - 시뮬레이터가 갱신하지 않는 위성 3990대: 이전과 이후 JSON이 바이트 단위로 같음
+  - 키 이름·순서 차이 0
+  - 값 타입 차이는 시뮬레이터 위성 2대의 rssi(교신 종료로 숫자→null)뿐. 코드 변화가 아니라 데이터가 바뀐 것
+- 원시 SQL 사용. `LATERAL`은 PostgreSQL 전용이라 주석에 SQL Server 대응(`OUTER APPLY`)을 적음
+
+### 2) GET /satellites/:id/telemetry/summary (24485e3)
+- 파라미터
+  - `from`, `to`: ISO 8601, 둘 다 포함, 필수
+  - `bucketSeconds`: 양의 정수, 필수
+  - 형식 오류나 from > to이면 400, 없는 위성이면 404
+- 계산: DB에서 `date_bin(make_interval(secs => bucketSeconds), ts, from)`으로 묶어 battery min/max/avg
+  - t 오름차순, 데이터 없는 구간은 빠짐
+- SAT-001 측정 (7회)
+
+| 구간 | bucket | 결과 구간 수 | 읽은 행 | 평균 응답 | EXPLAIN |
+|---|---|---|---|---|---|
+| 최근 1분 | 5 s | 5 | 24 | 0.007 s | 0.73 ms |
+| 최근 1시간 | 60 s | 5 | 131 | 0.005 s | 1.00 ms |
+| 최근 24시간 | 900 s | 1 | 131 | 0.005 s | 0.28 ms |
+
+- 실행 계획: 모두 `idx_telemetry_sat_ts` Index Scan → Sort → GroupAggregate
+- 주의: SAT-001의 최근 데이터는 이번 세션에서 시뮬레이터를 잠깐씩 돌린 것뿐이라 행 수가 적음
+  - 1초 주기 24시간치(약 86,400행)로는 측정하지 않음
+- avg는 double이라 소수점이 길게 나옴 (예: 28.52599983215332). 반올림은 하지 않음
+
+### 3) GET /satellites/stats (1f1960f)
+- 결과 형태: `{ total, warning, safe, contact }`
+- 계산: 1번과 같은 LATERAL로 최신 텔레메트리를 구하고 `count(*) FILTER`로 셈. 쿼리 1건
+  - warning: SAFE 또는 battery < 20
+  - safe: SAFE
+  - contact: rssi IS NOT NULL. 신선도 기준 없음
+  - 텔레메트리 없는 위성은 total에만 포함
+- 라우트를 `':id/…'`보다 먼저 선언함
+- 검증
+  - `/satellites` 응답으로 직접 센 값과 일치: 4000 / 1047 / 1047 / 478
+  - 텔레메트리 없는 위성: 트랜잭션 안에서 임시로 추가해 total만 늘어나는 것 확인 → ROLLBACK
+- 응답 0.046 s (7회 평균), EXPLAIN 49 ms
+
+### 4) CORS (16ecef4)
+- `app.enableCors({ origin: ['http://localhost:5173'] })`
+  - 처음에는 문자열로 줬는데, 그러면 다른 Origin에도 `Access-Control-Allow-Origin: http://localhost:5173`을 그대로 보냄
+  - 배열로 바꿔서 일치할 때만 헤더를 보내게 함
+- 확인
+  - Origin 5173 GET: 5개 엔드포인트 모두 ACAO 헤더 있음
+  - OPTIONS 사전 요청: 204, `Allow-Methods`, `Allow-Headers: content-type`
+  - `http://localhost:3001`, `http://127.0.0.1:5173`: ACAO 헤더 없음
+
+### Swagger
+- 새 DTO: `TelemetrySummaryQueryDto`, `TelemetrySummaryPointDto`, `SatelliteStatsDto`
+- `/api/docs-json` 확인 결과
+  - t는 `string, format: date-time`
+  - stats 필드는 `integer`
+  - 쿼리 파라미터 3개 모두 required, bucketSeconds는 `integer, minimum 1`
+
+---
+
 ## 2026-11-07 — dashboard 2단계: 디자인, 배터리 차트
 
 작업 브랜치 `dev`. 보이는 것만 작업함. 클릭, 기간 선택, 모드 전환 동작은 3단계에서 함.
