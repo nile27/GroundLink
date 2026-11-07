@@ -1,7 +1,8 @@
 import type { Alarm } from '../types/api';
 
 interface Props {
-  alarms: Alarm[];
+  /** null = 첫 응답 전 */
+  alarms: Alarm[] | null;
 }
 
 function formatTs(iso: string): string {
@@ -11,7 +12,7 @@ function formatTs(iso: string): string {
 export function AlarmTable({ alarms }: Props) {
   return (
     <section className="flex min-h-0 flex-col rounded-lg border border-gray-200 bg-white">
-      <h2 className="border-b border-gray-200 px-4 py-2 font-semibold">알람 ({alarms.length})</h2>
+      <h2 className="border-b border-gray-200 px-4 py-2 font-semibold">알람 ({alarms?.length ?? '-'})</h2>
       {/* 표만 스크롤 */}
       <div className="min-h-0 flex-1 overflow-y-auto">
         <table className="w-full text-sm">
@@ -27,7 +28,14 @@ export function AlarmTable({ alarms }: Props) {
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
-            {alarms.map((a) => (
+            {alarms === null && (
+              <tr>
+                <td colSpan={7} className="px-3 py-2 text-muted">
+                  불러오는 중…
+                </td>
+              </tr>
+            )}
+            {alarms?.map((a) => (
               <tr key={a.id}>
                 <td className="px-3 py-2 tabular-nums">{formatTs(a.ts)}</td>
                 <td className="px-3 py-2">{a.satId}</td>

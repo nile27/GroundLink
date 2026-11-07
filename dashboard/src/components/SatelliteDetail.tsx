@@ -8,16 +8,29 @@ import { ModeBadge } from './ModeBadge';
 
 interface Props {
   satellite: SatelliteSummary;
-  batterySeries: BatteryPoint[];
+  /** null = 불러오는 중 */
+  batterySeries: BatteryPoint[] | null;
   range: RangeKey;
   onRangeChange: (range: RangeKey) => void;
   onToggleMode: () => void;
+  /** 모드 명령 요청 중 (버튼 비활성) */
+  commandPending: boolean;
+  /** 모드 명령 실패 메시지 */
+  commandError: string | null;
 }
 
-export function SatelliteDetail({ satellite, batterySeries, range, onRangeChange, onToggleMode }: Props) {
+export function SatelliteDetail({
+  satellite,
+  batterySeries,
+  range,
+  onRangeChange,
+  onToggleMode,
+  commandPending,
+  commandError,
+}: Props) {
   const t = satellite.latestTelemetry;
   const { warning, contact } = getSatStatus(t);
-  const summary = summarize(batterySeries);
+  const summary = batterySeries ? summarize(batterySeries) : null;
 
   const latest = [
     { label: 'battery', value: t ? `${t.battery.toFixed(1)}%` : '-' },
@@ -48,16 +61,22 @@ export function SatelliteDetail({ satellite, batterySeries, range, onRangeChange
             {t ? (contact ? '교신 중' : '교신 없음') : '텔레메트리 없음'}
           </span>
         </div>
-        {/* 모드 전환: 목업 상태의 mode만 바꾼다. 텔레메트리 없으면 비활성 */}
+        {/* 모드 전환: POST 명령만 보냄. 화면의 mode는 폴링 텔레메트리로 바뀜. 텔레메트리 없거나 요청 중이면 비활성 */}
         <button
           type="button"
           onClick={onToggleMode}
-          disabled={!t}
+          disabled={!t || commandPending}
           className="rounded-md border border-gray-300 px-3 py-1.5 text-sm disabled:cursor-not-allowed disabled:opacity-50"
         >
           {t?.mode === 'SAFE' ? 'NORMAL로 전환' : 'SAFE로 전환'}
         </button>
       </header>
+
+      {commandError && (
+        <div role="alert" className="border-b border-warning bg-warning-bg px-4 py-2 text-sm text-warning">
+          모드 전환 명령 실패: {commandError}
+        </div>
+      )}
 
       <div className="flex flex-col gap-4 p-4">
         {/* 최신 값 */}
@@ -96,7 +115,13 @@ export function SatelliteDetail({ satellite, batterySeries, range, onRangeChange
             </div>
           </div>
           <div className="h-56">
-            <BatteryChart data={batterySeries} />
+            {batterySeries === null ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted">불러오는 중…</div>
+            ) : batterySeries.length === 0 ? (
+              <div className="flex h-full items-center justify-center text-sm text-muted">이 기간에 데이터 없음</div>
+            ) : (
+              <BatteryChart data={batterySeries} />
+            )}
           </div>
           {/* 구간 요약 */}
           <dl className="grid grid-cols-3 gap-2">
