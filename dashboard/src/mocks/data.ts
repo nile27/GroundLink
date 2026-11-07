@@ -1,4 +1,4 @@
-import type { Alarm, SatelliteSummary, Telemetry } from '../types/api';
+import type { Alarm, BatteryPoint, SatelliteSummary, Telemetry } from '../types/api';
 
 /** 하드코딩 목업. 나중에 GET /satellites, GET /alarms 응답으로 바꾼다 */
 
@@ -28,6 +28,8 @@ export const mockSatellites: SatelliteSummary[] = [
   { id: 'SAT-005', name: null, createdAt, latestTelemetry: tm('SAT-005', '1005', { battery: 41.9, temp: -5.6, rssi: null, mode: 'NORMAL', sunlit: false }) },
   // 텔레메트리 없음
   { id: 'SAT-006', name: null, createdAt, latestTelemetry: null },
+  // 경고: NORMAL 이지만 배터리 < 20 (경고 조건의 다른 갈래)
+  { id: 'SAT-007', name: null, createdAt, latestTelemetry: tm('SAT-007', '1007', { battery: 18.4, temp: 8.2, rssi: null, mode: 'NORMAL', sunlit: false }) },
 ];
 
 export const mockAlarms: Alarm[] = [
@@ -35,3 +37,18 @@ export const mockAlarms: Alarm[] = [
   { id: '30', satId: 'SAT-003', ts: '2026-11-07T08:51:12.000Z', type: 'BATTERY_LOW', severity: 'CRITICAL', value: 19.8, threshold: 20, message: 'BATTERY_LOW: 19.8% (임계값 20%)', receivedAt: '2026-11-07T08:51:12.015Z' },
   { id: '29', satId: 'SAT-005', ts: '2026-11-07T08:32:05.000Z', type: 'TEMP_LOW', severity: 'WARNING', value: -30.6, threshold: -30, message: 'TEMP_LOW: -30.6°C (임계값 -30°C)', receivedAt: '2026-11-07T08:32:05.011Z' },
 ];
+
+/**
+ * 선택 위성 배터리 차트 목업 (5분 구간 12개 = 최근 1시간).
+ * 나중에 텔레메트리 구간 요약(summary) API 응답으로 교체할 예정.
+ */
+export const mockBatterySeries: BatteryPoint[] = [
+  [70.1, 72.4, 71.2], [71.0, 73.8, 72.5], [72.6, 75.1, 73.9], [73.9, 76.2, 75.0],
+  [74.8, 77.0, 76.0], [75.2, 77.9, 76.6], [74.1, 76.8, 75.5], [72.0, 75.0, 73.4],
+  [70.3, 73.1, 71.6], [71.8, 74.9, 73.2], [73.5, 76.4, 75.1], [75.0, 77.6, 76.5],
+].map(([min, max, avg], i) => ({
+  t: new Date(Date.UTC(2026, 10, 7, 8, 5 + i * 5)).toISOString(),
+  min,
+  max,
+  avg,
+}));

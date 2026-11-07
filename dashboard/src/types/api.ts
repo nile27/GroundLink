@@ -41,3 +41,14 @@ export interface Alarm {
   message: string;
   receivedAt: string;
 }
+
+/**
+ * 배터리 차트 한 점 (구간 요약). 아직 서버에 없는 응답 형태 — summary API를 만들 때 맞출 것.
+ * t: 구간 시작 시각 (ISO 8601), min/max/avg: 구간 안 배터리 (%)
+ */
+export interface BatteryPoint {
+  t: string;
+  min: number;
+  max: number;
+  avg: number;
+}
