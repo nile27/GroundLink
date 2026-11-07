@@ -4,6 +4,8 @@ import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository
 import { Satellite, Telemetry } from '../database/entities';
 import { SatelliteSummaryDto } from './dto/satellite-summary.dto';
 import { TelemetryQueryDto } from './dto/telemetry-query.dto';
+import { TelemetrySummaryPointDto } from './dto/telemetry-summary-point.dto';
+import { TelemetrySummaryQueryDto } from './dto/telemetry-summary-query.dto';
 
 const DEFAULT_TELEMETRY_LIMIT = 100;
 
@@ -98,6 +100,32 @@ export class SatellitesService {
     else if (to) where.ts = LessThanOrEqual(to);
 
     return this.telemetry.find({ where, order: { ts: 'DESC' }, take: q.limit ?? DEFAULT_TELEMETRY_LIMIT });
+  }
+
+  /**
+   * 배터리 구간 요약. from~to(둘 다 포함)를 from 기준 bucketSeconds 간격으로 묶어 min/max/avg.
+   * 묶기는 DB에서 date_bin (PostgreSQL 14+). 데이터 없는 구간은 응답에 없다. t 오름차순
+   */
+  async summarizeTelemetry(satId: string, q: TelemetrySummaryQueryDto): Promise<TelemetrySummaryPointDto[]> {
+    await this.assertExists(satId);
+
+    const from = new Date(q.from);
+    const to = new Date(q.to);
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      throw new BadRequestException('from, to 는 ISO 8601 형식이어야 합니다');
+    }
+    if (from > to) throw new BadRequestException('from 이 to 보다 늦습니다');
+
+    const rows: { t: Date; min: number; max: number; avg: number }[] = await this.telemetry.query(
+      `SELECT date_bin(make_interval(secs => $4), ts, $2) AS t,
+              min(battery) AS min, max(battery) AS max, avg(battery) AS avg
+         FROM telemetry
+        WHERE sat_id = $1 AND ts >= $2 AND ts <= $3
+        GROUP BY 1
+        ORDER BY 1`,
+      [satId, from, to, q.bucketSeconds],
+    );
+    return rows.map((r) => ({ t: r.t, min: r.min, max: r.max, avg: r.avg }));
   }
 }
 

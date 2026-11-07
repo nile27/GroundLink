@@ -1,10 +1,12 @@
 import { Body, Controller, DefaultValuePipe, Get, HttpCode, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
-import { ApiAcceptedResponse, ApiNotFoundResponse, ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
+import { ApiAcceptedResponse, ApiBadRequestResponse, ApiNotFoundResponse, ApiOkResponse, ApiQuery, ApiTags } from '@nestjs/swagger';
 import { Command, Telemetry } from '../database/entities';
 import { CommandsService } from '../commands/commands.service';
 import { CreateCommandDto } from './dto/create-command.dto';
 import { SatelliteSummaryDto } from './dto/satellite-summary.dto';
 import { TelemetryQueryDto } from './dto/telemetry-query.dto';
+import { TelemetrySummaryPointDto } from './dto/telemetry-summary-point.dto';
+import { TelemetrySummaryQueryDto } from './dto/telemetry-summary-query.dto';
 import { SatellitesService } from './satellites.service';
 
 @ApiTags('satellites')
@@ -26,6 +28,20 @@ export class SatellitesController {
   @ApiNotFoundResponse({ description: '위성 없음' })
   telemetry(@Param('id') id: string, @Query() query: TelemetryQueryDto): Promise<Telemetry[]> {
     return this.satellites.findTelemetry(id, query);
+  }
+
+  @Get(':id/telemetry/summary')
+  @ApiOkResponse({
+    type: [TelemetrySummaryPointDto],
+    description: '배터리 구간 요약 (t 오름차순). 데이터 없는 구간은 빠진다',
+  })
+  @ApiBadRequestResponse({ description: 'from/to/bucketSeconds 형식 오류 또는 from > to' })
+  @ApiNotFoundResponse({ description: '위성 없음' })
+  telemetrySummary(
+    @Param('id') id: string,
+    @Query() query: TelemetrySummaryQueryDto,
+  ): Promise<TelemetrySummaryPointDto[]> {
+    return this.satellites.summarizeTelemetry(id, query);
   }
 
   @Post(':id/commands')
