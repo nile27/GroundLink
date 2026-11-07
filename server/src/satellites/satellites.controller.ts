@@ -3,6 +3,7 @@ import { ApiAcceptedResponse, ApiBadRequestResponse, ApiNotFoundResponse, ApiOkR
 import { Command, Telemetry } from '../database/entities';
 import { CommandsService } from '../commands/commands.service';
 import { CreateCommandDto } from './dto/create-command.dto';
+import { SatelliteStatsDto } from './dto/satellite-stats.dto';
 import { SatelliteSummaryDto } from './dto/satellite-summary.dto';
 import { TelemetryQueryDto } from './dto/telemetry-query.dto';
 import { TelemetrySummaryPointDto } from './dto/telemetry-summary-point.dto';
@@ -21,6 +22,13 @@ export class SatellitesController {
   @ApiOkResponse({ type: [SatelliteSummaryDto], description: '위성 목록 + 각 위성 최신 텔레메트리' })
   list(): Promise<SatelliteSummaryDto[]> {
     return this.satellites.listWithLatest();
+  }
+
+  // 고정 경로는 ':id' 로 시작하는 라우트보다 먼저 선언한다 (나중에 GET /satellites/:id 가 생겨도 stats 가 가려지지 않게)
+  @Get('stats')
+  @ApiOkResponse({ type: SatelliteStatsDto, description: '각 위성 최신 텔레메트리 기준 집계' })
+  stats(): Promise<SatelliteStatsDto> {
+    return this.satellites.stats();
   }
 
   @Get(':id/telemetry')

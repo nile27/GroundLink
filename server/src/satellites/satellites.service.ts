@@ -2,12 +2,16 @@ import { BadRequestException, Injectable, NotFoundException } from '@nestjs/comm
 import { InjectRepository } from '@nestjs/typeorm';
 import { Between, FindOptionsWhere, LessThanOrEqual, MoreThanOrEqual, Repository } from 'typeorm';
 import { Satellite, Telemetry } from '../database/entities';
+import { SatelliteStatsDto } from './dto/satellite-stats.dto';
 import { SatelliteSummaryDto } from './dto/satellite-summary.dto';
 import { TelemetryQueryDto } from './dto/telemetry-query.dto';
 import { TelemetrySummaryPointDto } from './dto/telemetry-summary-point.dto';
 import { TelemetrySummaryQueryDto } from './dto/telemetry-summary-query.dto';
 
 const DEFAULT_TELEMETRY_LIMIT = 100;
+
+/** 경고 기준 배터리 (%). 미만이면 경고 (dashboard 판정과 같은 값) */
+export const WARNING_BATTERY = 20;
 
 /**
  * 각 위성의 최신 텔레메트리 1행 (없으면 t.* 가 모두 NULL). satellites 별칭은 s.
@@ -79,6 +83,23 @@ export class SatellitesService {
       createdAt: r.created_at,
       latestTelemetry: toTelemetry(r),
     }));
+  }
+
+  /**
+   * 위성 상태 집계. listWithLatest와 같은 LATERAL로 최신 텔레메트리를 구해 쿼리 1건으로 센다.
+   * 텔레메트리 없는 위성은 t.* 가 NULL이라 total에만 들어간다.
+   */
+  async stats(): Promise<SatelliteStatsDto> {
+    const [row]: SatelliteStatsDto[] = await this.satellites.query(
+      `SELECT count(*)::int AS total,
+              count(*) FILTER (WHERE t.mode = 'SAFE' OR t.battery < $1)::int AS warning,
+              count(*) FILTER (WHERE t.mode = 'SAFE')::int AS safe,
+              count(*) FILTER (WHERE t.rssi IS NOT NULL)::int AS contact
+         FROM satellites s
+         ${LATEST_TELEMETRY_JOIN}`,
+      [WARNING_BATTERY],
+    );
+    return { total: row.total, warning: row.warning, safe: row.safe, contact: row.contact };
   }
 
   async assertExists(satId: string): Promise<void> {
