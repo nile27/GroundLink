@@ -7,6 +7,51 @@ import { TelemetryQueryDto } from './dto/telemetry-query.dto';
 
 const DEFAULT_TELEMETRY_LIMIT = 100;
 
+/**
+ * 각 위성의 최신 텔레메트리 1행 (없으면 t.* 가 모두 NULL). satellites 별칭은 s.
+ * PostgreSQL LATERAL. SQL Server로 바꿀 때는 OUTER APPLY (SELECT TOP 1 ...)로 대응한다.
+ */
+const LATEST_TELEMETRY_JOIN = `LEFT JOIN LATERAL (
+    SELECT * FROM telemetry t WHERE t.sat_id = s.id ORDER BY t.ts DESC LIMIT 1
+  ) t ON true`;
+
+const LATEST_COLUMNS = `t.id AS t_id, t.sat_id AS t_sat_id, t.ts AS t_ts, t.battery AS t_battery, t.temp AS t_temp,
+  t.rssi AS t_rssi, t.mode AS t_mode, t.sunlit AS t_sunlit, t.received_at AS t_received_at, t.inserted_at AS t_inserted_at`;
+
+/** pg 드라이버가 돌려주는 행. bigint는 string, real은 number, timestamptz는 Date */
+interface LatestRow {
+  id: string;
+  name: string | null;
+  created_at: Date;
+  t_id: string | null;
+  t_sat_id: string;
+  t_ts: Date;
+  t_battery: number;
+  t_temp: number;
+  t_rssi: number | null;
+  t_mode: Telemetry['mode'];
+  t_sunlit: boolean;
+  t_received_at: Date | null;
+  t_inserted_at: Date;
+}
+
+/** 키 순서는 Telemetry 엔티티 선언 순서와 같게 (이전 응답과 동일한 JSON) */
+function toTelemetry(r: LatestRow): Telemetry | null {
+  if (r.t_id === null) return null;
+  return {
+    id: r.t_id,
+    satId: r.t_sat_id,
+    ts: r.t_ts,
+    battery: r.t_battery,
+    temp: r.t_temp,
+    rssi: r.t_rssi,
+    mode: r.t_mode,
+    sunlit: r.t_sunlit,
+    receivedAt: r.t_received_at,
+    insertedAt: r.t_inserted_at,
+  };
+}
+
 @Injectable()
 export class SatellitesService {
   constructor(
@@ -15,19 +60,23 @@ export class SatellitesService {
   ) {}
 
   /**
-   * 위성 목록 + 각 위성의 최신 텔레메트리.
-   * [기준선] 위성마다 쿼리 1건 (N+1). (sat_id, ts) 인덱스를 타므로 위성 수가 적을 때는 충분하다.
+   * 위성 목록 + 각 위성의 최신 텔레메트리. 쿼리 1건.
+   * 위성마다 (sat_id, ts) 인덱스를 역순으로 1행만 읽는다 (LEFT JOIN LATERAL ... LIMIT 1).
+   * 응답 형태는 이전(N+1, 위성마다 findOne)과 같다: 키 순서·타입 포함.
    */
   async listWithLatest(): Promise<SatelliteSummaryDto[]> {
-    const sats = await this.satellites.find({ order: { id: 'ASC' } });
-    return Promise.all(
-      sats.map(async (s) => ({
-        id: s.id,
-        name: s.name,
-        createdAt: s.createdAt,
-        latestTelemetry: await this.telemetry.findOne({ where: { satId: s.id }, order: { ts: 'DESC' } }),
-      })),
+    const rows: LatestRow[] = await this.satellites.query(
+      `SELECT s.id, s.name, s.created_at, ${LATEST_COLUMNS}
+         FROM satellites s
+         ${LATEST_TELEMETRY_JOIN}
+        ORDER BY s.id`,
     );
+    return rows.map((r) => ({
+      id: r.id,
+      name: r.name,
+      createdAt: r.created_at,
+      latestTelemetry: toTelemetry(r),
+    }));
   }
 
   async assertExists(satId: string): Promise<void> {
