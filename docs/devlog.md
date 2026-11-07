@@ -4,6 +4,50 @@
 
 ---
 
+## 2026-11-07 — dashboard 2단계: 디자인, 배터리 차트
+
+작업 브랜치 `dev`. 보이는 것만 작업함. 클릭, 기간 선택, 모드 전환 동작은 3단계에서 함.
+
+### 한 일
+- **Recharts** (af74ac2): `npm install recharts@3.10.1 -w dashboard`, 정확한 버전으로 기록
+  - peer 범위 react ^16.8~^19, react-dom ^16~^19: 설치된 19.3.1과 맞음
+  - peer react-is: npm이 19.3.1을 자동 설치함. package.json에는 적지 않음
+- **목업 보강** (ecf0972)
+  - SAT-007: NORMAL인데 배터리 18.4. 경고 조건 두 가지(SAFE / 배터리 < 20)가 모두 화면에 나오게 함
+  - 차트 목업 `mockBatterySeries`: `{ t, min, max, avg }[]`, 5분 구간 12개. 나중에 summary API 응답으로 교체
+- **디자인** (957fa1b)
+  - 색은 `index.css`의 `@theme static`에 의미 이름으로 정의함
+    - static으로 둔 이유: 차트에서 `var(--color-*)`를 쓰므로, 클래스에서 쓰지 않는 색도 변수로 출력되게 하려고
+  - 상태 색은 `data-*` 속성과 `data-[...]:` 변형으로만 입힘. 컴포넌트에서 className 문자열을 조합하지 않음
+    - 경고 카드: 빨간 테두리와 배경
+    - 선택 카드: 파란 ring. 경고 색과 겹쳐도 구분됨
+    - 교신 점: 교신 중이면 초록, 아니면 회색
+    - SAFE: 주황 배지
+    - 요약 바: 항목별 색
+    - 알람 severity: CRITICAL 빨강, WARNING 주황
+  - 레이아웃: 화면 높이를 고정하고, 위성 목록과 알람 표가 각자 스크롤됨
+    - 알람 표 헤더는 sticky
+    - 숫자는 tabular-nums
+  - 배터리 차트(`BatteryChart`)
+    - avg는 선, min~max는 면
+    - y축 0~100%, 20%에 점선 경고 기준선
+  - 구간 요약: `lib/summary.ts`의 `summarize()`로 최소·최대·평균을 계산
+    - 평균은 구간 평균들의 단순 평균 (목업에 구간별 샘플 수가 없음)
+  - 새 컴포넌트: `ModeBadge`, `ContactDot`, `BatteryChart`
+
+### 검증
+- `npm run build:dashboard`, 루트 `npm run build` 성공
+  - Vite가 JS 청크 614 kB(500 kB 초과) 경고를 냄. 대부분 Recharts. 이번 범위(최적화 제외)라 그대로 둠
+- 개발 서버 + 헤드리스 Chrome으로 화면 확인 후 종료
+  - 경고 카드 2장(SAT-003, SAT-007) 빨강, 선택 카드(SAT-001) 파란 ring
+  - 요약: 전체 7 / 경고 2 / SAFE 1 / 교신 중 2
+  - 차트에 선, 범위 면, 20% 기준선이 모두 렌더링됨. 구간 요약 70.1% / 77.9% / 74.2%
+
+### 메모
+- 목업의 min~max 폭이 2~3%라 0~100% 축에서 범위 면이 얇게 보임
+
+---
+
 ## 2026-11-07 — dashboard 1단계: Tailwind 설치, 화면 뼈대 (목업)
 
 작업 브랜치 `dev`. 구조만 만들었고 동작·색·디자인은 다음 단계.
