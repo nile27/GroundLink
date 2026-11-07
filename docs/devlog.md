@@ -4,6 +4,84 @@
 
 ---
 
+## 2026-11-07 — dashboard 4단계: API 연동 (폴링)
+
+작업 브랜치 `dev`. 성능 최적화는 하지 않음. memo, useCallback, useMemo 없음. 5단계 기준선.
+
+### 커밋
+- 952417d: 카드 `<button>` 안의 div와 dl을 span으로 바꿈. 2·3단계와 스크린샷이 바이트 단위로 같음
+- e95a9d6: 타입 생성
+- 0982ce0: API 연동
+
+### 타입 생성
+- `gen:api`: `npx -y openapi-typescript@7.13.0 … -o src/types/openapi.d.ts`. 생성 파일은 커밋함
+- devDependency로 설치하지 못함
+  - openapi-typescript 7.13.0의 peer가 `typescript ^5.x`라서 dashboard의 TS 7.0.2와 충돌(ERESOLVE)
+  - 루트 `overrides`로도 해결되지 않음
+  - npx가 자체 캐시에 TS 5.9.3을 받아서 실행함
+- `src/types/api.ts`는 생성 타입(`components['schemas'][…]`)의 별칭만 둠
+- 생성 타입과 실제 응답의 차이 (손으로 고치지 않음)
+  - `SatelliteSummaryDto.name`: `name?:`(선택)으로 생성됨. 실제 응답에는 항상 있음(null). 서버 DTO가 `required: false`라서
+  - `Command.params`: `Record<string, never>`로 생성됨. 실제로는 `{ mode }` 같은 객체
+  - `Command.resultMessage`, `ackedAt`: 선택 필드로 생성됨. 실제로는 항상 있음(null 가능)
+
+### API 연동
+- 폴링 대상
+  - `/satellites`, `/satellites/stats`, `/alarms?limit=50` (서버 허용 1~500)
+  - 엔드포인트마다 "요청이 끝난 뒤 1초 후 다음 요청"
+- 언마운트나 위성·기간이 바뀌면 타이머를 지우고 진행 중 요청을 abort함. 멈춘 뒤 도착한 응답은 버림
+- 요약 바는 stats API 값을 씀
+- 선택은 id로 유지
+  - 초기 선택은 첫 응답의 첫 위성
+  - 선택한 위성이 응답에서 사라지면 null
+- 차트: summary API
+  - bucketSeconds는 1분 5, 1시간 60, 24시간 900
+  - 위성이나 기간이 바뀌면 다시 호출하고, 그 뒤로는 1초 폴링
+  - 구간 요약은 응답에서 계산
+- 모드 명령: POST SET_MODE
+  - 낙관적 업데이트 없음
+  - 요청 중에는 버튼 비활성, 실패하면 상세 패널에 표시
+- 로딩·에러
+  - 첫 응답 전에는 로딩 표시
+  - 폴링이 실패하면 마지막 데이터를 유지하고 상단에 에러 표시. 폴링은 계속하고, 성공하면 에러를 지움
+
+### 검증 (백엔드 + 시뮬레이터, 헤드리스 Chrome CDP)
+- build:dashboard, 루트 build 성공 (JS 청크 500 kB 초과 경고는 그대로)
+- 같은 엔드포인트 동시 요청
+  - 겹침은 페이지를 처음 열 때 3건뿐. 개발 모드 StrictMode가 effect를 두 번 실행하면서, 첫 요청은 abort되고(ERR_ABORTED) 바로 다음 요청이 시작된 경우
+  - abort되지 않은 요청끼리 겹친 경우는 0건
+- 카드·기간 전환
+  - SAT-004를 클릭한 뒤 summary 요청은 모두 SAT-004
+  - 기간 1시간 → bucket 60 / 3600초, 24시간 → 900 / 86400초, 1분 → 5 / 60초
+  - 화면의 구간 요약이 마지막 응답으로 직접 계산한 값과 같음 (24시간 평균 66.2 vs 66.3은 화면을 읽는 순간 다음 응답이 도착한 차이)
+  - 클릭 후 첫 summary 요청까지 0.7~1.6초 걸림. 4000대 카드를 다시 그리느라 effect 실행이 늦어지는 것으로 보임 (5단계에서 확인)
+- 모드 명령 (SAT-001, 배터리 40%)
+  - NORMAL→SAFE: POST 202(7 ms), 카드 배지까지 0.6초
+  - SAFE→NORMAL: POST 202(5 ms), 카드 배지까지 3.1초
+- 서버 중지 → 0.5초 안에 에러 표시. 4개 갱신 실패가 모두 뜨고 위성 4000장은 유지됨. 폴링은 계속됨(ERR_CONNECTION_REFUSED)
+- 재시작 → 약 6.9초 뒤 에러 표시가 사라짐 (서버 기동 시간 포함)
+- 1차 시도에서는 에러 배너가 떴다가 서버가 아직 종료 중인데 사라짐
+  - graceful shutdown 동안 keep-alive 연결로 응답이 온 것으로 추정 (검증 안 함)
+
+### 명령 동작 (시뮬레이터 코드 근거)
+- `simulator/src/index.ts`: 명령을 받으면 바로 `setModeByCommand`를 부르고 ack를 발행함
+  - mode는 메모리에서 바로 바뀜. 텔레메트리에는 다음 tick(최대 1초)에 반영됨
+  - 화면까지는 tick + 서버 일괄 저장(FLUSH_MS 200) + 다음 폴링(1초 + 1.2 MB 응답 처리)이 걸림 → 0.6~3.1초로 관찰됨
+- `simulator/src/satellite.ts` `setModeByCommand`: `mode === 'NORMAL' && battery < 20`이면 거부
+  - 실패 ack 메시지: "배터리 x% < 20% 라서 NORMAL 전환 거부"
+  - 서버는 명령을 FAILED로 기록함. 화면의 mode는 SAFE 그대로
+  - dashboard는 POST 202만 보고 ack 결과(FAILED)를 표시하지 않음 → 사용자는 "버튼을 눌렀는데 안 바뀜"으로만 보게 됨
+- 같은 파일 tick: NORMAL인데 battery < 20이면 자동으로 SAFE로 바꿈. 그래서 배터리 20% 미만인 위성은 NORMAL로 유지될 수 없음
+- 배터리 20% 미만 위성에 실제로 명령을 보내지는 못함: 3분 동안 SAT-001~010 중 20% 미만이 없었음
+
+### 화면 반응 관찰 (수치 측정 아님)
+- 첫 화면까지 약 5.6초 (개발 서버 모듈 로딩 + 1.2 MB 응답 + 카드 4000장)
+- 클릭과 기간 전환이 화면과 요청에 반영되기까지 1초 안팎의 지연이 있음
+- 목록 휠 스크롤은 동작함 (10회 → scrollTop 4000)
+- 헤드리스라 끊김을 눈으로 보지는 못함
+
+---
+
 ## 2026-11-07 — dashboard 3단계: 이벤트 (목업)
 
 작업 브랜치 `dev`, 커밋 bbd980f. API 호출, 폴링, 패키지 설치, 디자인 변경은 하지 않음.
