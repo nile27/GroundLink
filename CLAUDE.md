@@ -44,7 +44,8 @@ simulator → Mosquitto → server → PostgreSQL
 - 종료: cd infra && docker compose down (볼륨은 유지됨)
 
 ## Git 규칙
-- 원격: https://github.com/nile27/GroundLink.git (main)
+- 원격: https://github.com/nile27/GroundLink.git (기본 브랜치 main)
+- 브랜치: 작업은 dev에서 하고, 단계가 끝나면 dev → main PR로 합친다 (PR에 단계 요약·전후 수치)
 - Conventional Commits (feat:, fix:, perf:, refactor:, test:, docs:, chore:)
 - 커밋은 작업 단위별로 분리
 - perf: 커밋에는 개선 전/후 수치 포함
