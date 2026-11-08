@@ -252,7 +252,8 @@ export interface components {
         SatelliteSummaryDto: {
             /** @example SAT-001 */
             id: string;
-            name?: string | null;
+            /** @description 위성 이름. 없으면 null (항상 포함) */
+            name: string | null;
             /** Format: date-time */
             createdAt: string;
             /** @description 가장 최근 텔레메트리. 없으면 null */
@@ -314,26 +315,29 @@ export interface components {
              */
             mode: "NORMAL" | "SAFE";
         };
+        SetModeParamsDto: {
+            /** @enum {string} */
+            mode: "NORMAL" | "SAFE";
+        };
         Command: {
             /** @description 명령 ID (UUID). MQTT cmd/ack의 cmdId와 같음 */
             id: string;
             satId: string;
             /** @enum {string} */
             type: "SET_MODE";
-            /**
-             * @example {
-             *       "mode": "SAFE"
-             *     }
-             */
-            params: Record<string, never>;
+            /** @description 명령 파라미터 (SET_MODE: { mode }) */
+            params: components["schemas"]["SetModeParamsDto"];
             /** @enum {string} */
             status: "PENDING" | "SUCCESS" | "FAILED" | "TIMEOUT";
-            /** @description ack 메시지 또는 실패·타임아웃 사유 */
-            resultMessage?: string | null;
+            /** @description ack 메시지 또는 실패·타임아웃 사유. PENDING 동안 null (항상 포함) */
+            resultMessage: string | null;
             /** Format: date-time */
             requestedAt: string;
-            /** Format: date-time */
-            ackedAt?: string | null;
+            /**
+             * Format: date-time
+             * @description ack 수신 시각 (위성 시각). ack 전·TIMEOUT·MQTT 발행 실패면 null (항상 포함)
+             */
+            ackedAt: string | null;
         };
         Alarm: {
             id: string;
