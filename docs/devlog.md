@@ -4,6 +4,71 @@
 
 ---
 
+## 2026-11-08 — 4단계 마무리: Swagger 선언 정리, 명령 결과 표시
+
+작업 브랜치 `dev`. memo, useCallback, useMemo는 계속 쓰지 않음.
+
+### 커밋
+- 2fdbd25: server Swagger 선언
+- 1a720c5: 타입 재생성
+- 2f1505c: 명령 결과 표시
+
+### 1) Swagger 선언을 실제 응답에 맞춤 (응답 JSON은 그대로)
+- `SatelliteSummaryDto.name`: required, nullable
+- `Command.params`: `SetModeParamsDto { mode: NORMAL | SAFE }`
+  - 명령 종류가 SET_MODE 하나뿐이고 `sendSetMode`가 `{ mode }`만 저장함
+- `Command.resultMessage`, `ackedAt`: required, nullable
+  - resultMessage: PENDING 동안 null
+  - ackedAt: ack 전, TIMEOUT, MQTT 발행 실패일 때 null
+  - 근거: 엔티티 컬럼 `nullable: true`, `commands.service.ts`의 갱신 경로, 실제 응답
+- 확인 방법: 9개 응답의 모든 필드를 `/api/docs-json` 스키마와 대조하는 스크립트
+  - 대상: health, satellites, stats, alarms, telemetry, summary, commands GET×2, POST
+  - 결과: 수정 전 3종 7건 → 수정 후 0건
+- `gen:api` 재생성 결과: `name`, `resultMessage`, `ackedAt`이 선택 필드가 아니게 됨. `params`는 `SetModeParamsDto`
+
+### 2) 명령 결과 표시 (dashboard)
+- 명령 상태값 근거
+  - `server/src/database/entities/command.entity.ts`의 `COMMAND_STATUSES` = PENDING, SUCCESS, FAILED, TIMEOUT
+  - 상태 전이 (`commands.service.ts`)
+    - PENDING → SUCCESS/FAILED: ack 수신 (`applyAck`)
+    - PENDING → TIMEOUT: 10초 동안 ack 없음 (`expire`)
+    - MQTT 발행이 실패하면 POST 응답이 바로 FAILED
+  - 종료 상태: SUCCESS, FAILED, TIMEOUT
+- 동작
+  - POST 후 종료 상태가 될 때까지 1초마다 `GET /satellites/:id/commands`로 확인
+  - 10초가 지나면 확인을 멈추고 "응답 없음" 표시
+  - 다른 위성을 고르면 결과 표시를 지우고 확인을 멈춤
+- SAFE이면서 battery < 20이면 "NORMAL로 전환" 버튼을 비활성하고 이유를 표시
+  - 근거: `simulator/src/satellite.ts`의 `setModeByCommand`가 거부함
+
+### 검증 (백엔드 + 시뮬레이터, 헤드리스 Chrome CDP)
+- build:dashboard, 루트 build 성공
+
+| 경우 | 결과 |
+|---|---|
+| 정상 SAT-002 → SAFE | "확인 중"을 거쳐 "성공 — 모드 변경: SAFE" (약 5.0초) |
+| 정상 SAT-002 → NORMAL | "성공 — 모드 변경: NORMAL" (약 2.8초). 결과가 나온 뒤 3초 동안 확인 요청 0건 |
+| 실패 SAT-016 | "실패 — 알 수 없는 위성" (약 2.7초) |
+| 배터리 19.9% SAFE (SAT-1826) | NORMAL 버튼 비활성 + "NORMAL 전환 불가: 배터리 19.9% < 20%" |
+| 확인 중 다른 위성 선택 | 결과 표시가 사라짐. 돌아가도 다시 나오지 않음. 이전 위성 확인 요청은 전환 직후 1건만 나가고 끊김 |
+| 응답 없음 | 시뮬레이터를 끄고 SAT-005에 명령 → 12.8초 뒤 "응답 없음". 서버 DB에는 TIMEOUT으로 기록됨 |
+
+- 실패 경우 설명: SAT-016은 서버에는 등록돼 있지만 시뮬레이터(10대)에는 없는 부하 측정용 위성
+  - 시뮬레이터가 `sat/+/cmd`를 구독하고 있어서 "알 수 없는 위성"으로 실패 ack를 보냄 (`simulator/src/index.ts`)
+- 배터리 20% 미만에서 NORMAL 거부 경로는 직접 확인 못 함. 버튼이 막혀 있어서 화면에서는 보낼 수 없음
+- 결과 표시가 ack(10 ms 안팎)보다 수 초 늦는 이유
+  - 위성 4000대를 매초 다시 그리는 동안 확인 요청과 화면 반영이 밀림
+  - 3단계 기준선 그대로이며 5단계 측정 대상
+- "응답 없음"은 화면에서 10초를 재고, 서버의 TIMEOUT도 10초(COMMAND_TIMEOUT_MS)
+  - 둘이 거의 같은 시각이라, 화면에는 TIMEOUT 대신 "응답 없음"이 먼저 보일 수 있음
+
+### 메모
+- 서버를 SIGTERM으로 끄면 로그상 종료 처리(MQTT 종료, 버퍼 저장)는 끝났는데 프로세스가 25초 넘게 남음
+  - 3000 포트는 이미 닫혀 있었음. SIGKILL로 종료함
+  - 원인은 조사하지 않음. 범위 밖이라 기록만
+
+---
+
 ## 2026-11-07 — dashboard 4단계: API 연동 (폴링)
 
 작업 브랜치 `dev`. 성능 최적화는 하지 않음. memo, useCallback, useMemo 없음. 5단계 기준선.
