@@ -9,6 +9,8 @@ coverage/
 # Vite (dashboard) — dist, dist-ssr, *.local은 dashboard/.gitignore(템플릿)에서 무시
 # 설정 번들 임시 파일 (비정상 종료 시 남음)
 vite.config.*.timestamp-*
+# React Profiler 용 프로덕션 빌드 (npm run build:profile)
+dist-profile/
 
 # env
 .env

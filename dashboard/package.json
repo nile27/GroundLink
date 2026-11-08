@@ -8,6 +8,8 @@
     "build": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
+    "build:profile": "tsc -b && vite build --mode profile",
+    "preview:profile": "vite preview --mode profile --port 5173 --strictPort",
     "gen:api": "npx -y openapi-typescript@7.13.0 http://127.0.0.1:3000/api/docs-json -o src/types/openapi.d.ts"
   },
   "dependencies": {

@@ -14,7 +14,9 @@
     "start:sim": "npm run start -w simulator",
     "bench": "node bench/run.mjs",
     "dev:dashboard": "npm run dev -w dashboard",
-    "build:dashboard": "npm run build -w dashboard"
+    "build:dashboard": "npm run build -w dashboard",
+    "build:profile": "npm run build:profile -w dashboard",
+    "preview:profile": "npm run preview:profile -w dashboard"
   },
   "engines": {
     "node": ">=24"
