@@ -3,10 +3,12 @@ import { AlarmTable } from './components/AlarmTable';
 import { SatelliteDetail } from './components/SatelliteDetail';
 import { SatelliteList } from './components/SatelliteList';
 import { SummaryBar } from './components/SummaryBar';
-import { errorMessage, getAlarms, getBatterySummary, getSatelliteStats, getSatellites, sendSetMode } from './lib/api';
+import { errorMessage, getAlarms, getBatterySummary, getCommands, getSatelliteStats, getSatellites, sendSetMode } from './lib/api';
+import { COMMAND_CHECK_TIMEOUT_MS, type CommandResult, isFinalStatus } from './lib/commands';
 import { poll } from './lib/poll';
 import { RANGES, type RangeKey } from './lib/ranges';
 import type { Alarm, BatteryPoint, SatelliteStats, SatelliteSummary } from './types/api';
+
 
 /** 폴링 간격 (ms). 요청이 끝난 뒤 이만큼 기다렸다 다음 요청 */
 const POLL_MS = 1000;
@@ -37,6 +39,7 @@ function App() {
   // 모드 명령
   const [commandPending, setCommandPending] = useState(false);
   const [commandError, setCommandError] = useState<{ satId: string; message: string } | null>(null);
+  const [commandResult, setCommandResult] = useState<CommandResult | null>(null);
 
   function setPollError(source: PollSource, error: unknown | null) {
     setPollErrors((prev) => {
@@ -108,14 +111,65 @@ function App() {
     );
   }, [selectedId, range]);
 
+  // 명령 결과 확인: 종료 상태가 될 때까지만 1초 간격으로 GET /satellites/:id/commands.
+  // 10초 넘으면 "응답 없음"으로 멈춤. 다른 위성 선택(commandResult 초기화) 시 cleanup 으로 중단
+  const checkingCmdId = commandResult?.phase === 'checking' ? commandResult.cmdId : null;
+  const checkingSatId = commandResult?.phase === 'checking' ? commandResult.satId : null;
+  useEffect(() => {
+    if (!checkingCmdId || !checkingSatId) return;
+    const stop = poll(
+      (signal) => getCommands(checkingSatId, 20, signal),
+      (list) => {
+        const cmd = list.find((c) => c.id === checkingCmdId);
+        if (!cmd || !isFinalStatus(cmd.status)) return;
+        stop();
+        setCommandResult((prev) =>
+          prev?.cmdId === checkingCmdId ? { ...prev, status: cmd.status, message: cmd.resultMessage, phase: 'done' } : prev,
+        );
+      },
+      () => {
+        // 확인 요청 실패는 다음 확인에서 다시 시도 (10초 제한은 그대로)
+      },
+      POLL_MS,
+    );
+    const timeout = setTimeout(() => {
+      stop();
+      setCommandResult((prev) => (prev?.cmdId === checkingCmdId && prev.phase === 'checking' ? { ...prev, phase: 'no-response' } : prev));
+    }, COMMAND_CHECK_TIMEOUT_MS);
+    return () => {
+      stop();
+      clearTimeout(timeout);
+    };
+  }, [checkingCmdId, checkingSatId]);
+
+  /** 위성 선택. 이전 위성의 명령 결과 표시·확인은 중단 */
+  function selectSatellite(id: string) {
+    setSelectedId(id);
+    if (id !== selectedId) {
+      setCommandResult(null);
+      setCommandError(null);
+    }
+  }
+
   /** 모드 명령. 낙관적 업데이트 없음: 화면의 mode 는 폴링으로 받은 텔레메트리만 따른다 */
   async function requestModeChange(satellite: SatelliteSummary) {
     const current = satellite.latestTelemetry?.mode;
     if (!current) return;
+    const mode = current === 'SAFE' ? 'NORMAL' : 'SAFE';
     setCommandPending(true);
     setCommandError(null);
+    setCommandResult(null);
     try {
-      await sendSetMode(satellite.id, current === 'SAFE' ? 'NORMAL' : 'SAFE');
+      const cmd = await sendSetMode(satellite.id, mode);
+      // MQTT 발행 실패면 POST 응답이 이미 FAILED (종료 상태) → 확인 없이 바로 표시
+      setCommandResult({
+        satId: satellite.id,
+        cmdId: cmd.id,
+        mode,
+        status: cmd.status,
+        message: cmd.resultMessage,
+        phase: isFinalStatus(cmd.status) ? 'done' : 'checking',
+      });
     } catch (e) {
       setCommandError({ satId: satellite.id, message: errorMessage(e) });
     } finally {
@@ -153,7 +207,7 @@ function App() {
           <SummaryBar stats={stats} />
 
           <div className="grid min-h-0 flex-1 grid-cols-[20rem_1fr] gap-4">
-            <SatelliteList satellites={satellites} selectedId={selected?.id ?? null} onSelect={setSelectedId} />
+            <SatelliteList satellites={satellites} selectedId={selected?.id ?? null} onSelect={selectSatellite} />
             {selected ? (
               <SatelliteDetail
                 satellite={selected}
@@ -163,6 +217,7 @@ function App() {
                 onToggleMode={() => requestModeChange(selected)}
                 commandPending={commandPending}
                 commandError={commandError?.satId === selected.id ? commandError.message : null}
+                commandResult={commandResult?.satId === selected.id ? commandResult : null}
               />
             ) : (
               <div className="rounded-lg border border-gray-200 bg-white p-4 text-muted">위성을 선택하세요</div>

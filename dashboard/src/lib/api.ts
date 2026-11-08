@@ -56,6 +56,11 @@ export function getBatterySummary(
   return request(`/satellites/${encodeURIComponent(satId)}/telemetry/summary?${q}`, { signal });
 }
 
+/** GET /satellites/:id/commands?limit= (최신순, 서버 허용 1~200) */
+export function getCommands(satId: string, limit: number, signal?: AbortSignal): Promise<Command[]> {
+  return request(`/satellites/${encodeURIComponent(satId)}/commands?limit=${limit}`, { signal });
+}
+
 /** POST /satellites/:id/commands (SET_MODE). 202 = 발행됨, 반영은 텔레메트리로 확인 */
 export function sendSetMode(satId: string, mode: SatMode): Promise<Command> {
   const body: CreateCommand = { type: 'SET_MODE', mode };
