@@ -5,7 +5,7 @@ export class SatelliteSummaryDto {
   @ApiProperty({ example: 'SAT-001' })
   id: string;
 
-  @ApiProperty({ required: false, nullable: true, type: String })
+  @ApiProperty({ nullable: true, type: String, description: '위성 이름. 없으면 null (항상 포함)' })
   name: string | null;
 
   @ApiProperty()
