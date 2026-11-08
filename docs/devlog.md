@@ -4,6 +4,81 @@
 
 ---
 
+## 2026-11-08 — 5단계 준비: 24시간 시드, 프로파일링 빌드, 시뮬레이터 상태
+
+작업 브랜치 `dev`. memo, useCallback, useMemo는 계속 쓰지 않음.
+
+### 커밋
+- 19a61c1: 시드
+- 6dddaac: 프로파일링 빌드
+
+### 1) 24시간 텔레메트리 시드 (19a61c1)
+- 대상: `SEED-001`
+  - 새 위성. 시뮬레이터는 SAT-001~010만 돌림
+  - satellites 행이 없으면 추가함. name: "시드 (24시간 텔레메트리)"
+- 스크립트: `bench/seed/telemetry-24h.sql`, 실행은 `bash bench/seed/telemetry-24h.sh` (루트에서)
+- 동작: 트랜잭션 하나로 처리
+  1. `DELETE FROM telemetry WHERE sat_id = 'SEED-001'`
+  2. `generate_series`로 최근 24시간을 1초 간격으로 INSERT
+- 실행 시간
+
+| | DELETE | INSERT |
+|---|---|---|
+| 첫 실행 | 0행 | 86,400행, 4.88 s |
+| 재실행 | 86,400행, 0.08 s | 86,400행, 3.19 s |
+
+- 생성된 값
+  - battery: 12.7~97.0%. 20% 미만 4,340행, 이 구간은 모두 SAFE
+  - 교신(rssi 있음): 10,368행
+  - 일조: 56,160행
+- 1차 실행에서는 mode를 반올림 전 값으로 정해서 SAFE와 20% 미만 행 수가 4행 달랐음 → 반올림한 저장값 기준으로 고쳐서 재실행
+- telemetry 테이블 크기: 623 MB → 636 MB
+- `GET /satellites/:id/telemetry`의 limit 최대값은 **1000**
+  - 근거: `server/src/satellites/dto/telemetry-query.dto.ts`의 `@Max(1000)`
+  - limit=1001이면 400. 원본 86,400행은 이 API로 한 번에 받을 수 없음
+- summary API (SEED-001, 7회 평균)
+
+| 기간 | bucket | 구간 수 | 응답 |
+|---|---|---|---|
+| 1분 | 5 s | 9 | 0.006 s |
+| 1시간 | 60 s | 60 | 0.009 s |
+| 24시간 | 900 s | 96 | 0.072 s |
+
+  - 1분이 12구간이 아니라 9구간인 이유: 시드가 끝난 시각 이후 몇십 초는 데이터가 없음
+  - 24시간 EXPLAIN ANALYZE: 134 ms
+    - Index Scan으로 86,375행을 읽음
+    - Sort가 메모리에 들어가지 않아 디스크로 넘침 (external merge, 1,864 kB)
+    - 공유 버퍼 13.9만 블록을 읽음 (shared hit)
+    - 5단계에서 볼 지점
+
+### 2) 프로파일링 빌드 (6dddaac)
+- 근거: react-dom 19.3.1 `package.json`의 `exports`
+  - `"./profiling"` → `profiling.js`. production에서 `cjs/react-dom-profiling.profiling.js`를 불러옴
+  - 이 파일이 `exports.createRoot`를 내보냄
+  - scheduler 0.28.0에는 `exports`나 tracing 진입점이 없음 → scheduler alias는 필요 없음
+- 설정: `vite build --mode profile`
+  - `react-dom/client`를 `react-dom/profiling`으로 alias
+  - 출력은 `dist-profile/`, 압축 안 함 (컴포넌트 이름 유지)
+- 스크립트: `build:profile`, `preview:profile` (dashboard와 루트). `build:dashboard`는 그대로
+  - preview는 포트 5173 고정. 기본 포트 4173은 서버 CORS가 허용하지 않음
+- 확인: 페이지보다 먼저 가짜 DevTools hook을 넣고 비교
+  - 일반 빌드: 커밋 65회 중 `actualDuration` 있는 커밋 0회, 컴포넌트 이름 압축됨 (`oL`)
+  - 프로파일링 빌드: 67회 중 67회. 최대 149.6 ms, 이름 `App` 유지
+  - React DevTools 확장의 Profiler 녹화 화면은 헤드리스라 확인 못 함 → 직접 확인 필요
+- 번들 크기: 일반 618 kB, 프로파일링 1,590 kB (압축 안 함)
+
+### 3) 시뮬레이터 상태 복구
+- 명령을 보내지 않음. 확인해 보니 SAT-003(64.0%), SAT-009(63.8%) 모두 이미 NORMAL이었음
+- 이유
+  - 시뮬레이터는 상태를 메모리에만 들고 있음
+  - 이번 작업에서 백엔드를 다시 띄우면서 시뮬레이터도 재시작됐고, 모든 위성이 NORMAL로 시작함 (`simulator/src/satellite.ts:60`)
+
+### 검증
+- build:dashboard, build:profile, 루트 build 성공
+- 서버, 시뮬레이터, preview, Chrome 종료. 이번에는 서버가 SIGTERM으로 정상 종료됨
+
+---
+
 ## 2026-11-08 — 4단계 마무리: Swagger 선언 정리, 명령 결과 표시
 
 작업 브랜치 `dev`. memo, useCallback, useMemo는 계속 쓰지 않음.
